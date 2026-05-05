@@ -11,6 +11,7 @@ import com.example.gitissuewidget.data.local.TokenStore
 import com.example.gitissuewidget.domain.RepoRef
 import com.example.gitissuewidget.domain.SortDirection
 import com.example.gitissuewidget.domain.SortOption
+import com.example.gitissuewidget.domain.SwipeAction
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -27,6 +28,8 @@ data class SettingsUiState(
     val perPage: Int = PreferenceStore.DEFAULT_PER_PAGE,
     val showOpenBadge: Boolean = true,
     val showLabels: Boolean = true,
+    val leftSwipeAction: SwipeAction = SwipeAction.NONE,
+    val rightSwipeAction: SwipeAction = SwipeAction.NONE,
 )
 
 private data class BasicPrefs(
@@ -40,6 +43,11 @@ private data class BasicPrefs(
 private data class DisplayPrefs(
     val showOpenBadge: Boolean,
     val showLabels: Boolean,
+)
+
+private data class SwipePrefs(
+    val left: SwipeAction,
+    val right: SwipeAction,
 )
 
 class SettingsViewModel(
@@ -64,7 +72,12 @@ class SettingsViewModel(
         preferenceStore.showLabels,
     ) { open, labels -> DisplayPrefs(open, labels) }
 
-    val uiState: StateFlow<SettingsUiState> = combine(basicFlow, displayFlow) { basic, display ->
+    private val swipeFlow = combine(
+        preferenceStore.leftSwipeAction,
+        preferenceStore.rightSwipeAction,
+    ) { left, right -> SwipePrefs(left, right) }
+
+    val uiState: StateFlow<SettingsUiState> = combine(basicFlow, displayFlow, swipeFlow) { basic, display, swipe ->
         SettingsUiState(
             tokenSaved = basic.tokenSaved,
             watchedRepos = basic.watchedRepos,
@@ -73,6 +86,8 @@ class SettingsViewModel(
             perPage = basic.perPage,
             showOpenBadge = display.showOpenBadge,
             showLabels = display.showLabels,
+            leftSwipeAction = swipe.left,
+            rightSwipeAction = swipe.right,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
@@ -133,6 +148,14 @@ class SettingsViewModel(
 
     fun setShowLabels(value: Boolean) {
         viewModelScope.launch { preferenceStore.setShowLabels(value) }
+    }
+
+    fun setLeftSwipeAction(value: SwipeAction) {
+        viewModelScope.launch { preferenceStore.setLeftSwipeAction(value) }
+    }
+
+    fun setRightSwipeAction(value: SwipeAction) {
+        viewModelScope.launch { preferenceStore.setRightSwipeAction(value) }
     }
 
     fun consumeMessage() {

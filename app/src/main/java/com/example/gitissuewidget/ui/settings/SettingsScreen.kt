@@ -15,7 +15,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -47,6 +51,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.gitissuewidget.domain.RepoRef
 import com.example.gitissuewidget.domain.SortDirection
 import com.example.gitissuewidget.domain.SortOption
+import com.example.gitissuewidget.domain.SwipeAction
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -113,6 +118,82 @@ fun SettingsScreen(
                 onShowOpenBadgeChange = viewModel::setShowOpenBadge,
                 onShowLabelsChange = viewModel::setShowLabels,
             )
+            HorizontalDivider()
+            SwipeSection(
+                leftSwipeAction = uiState.leftSwipeAction,
+                rightSwipeAction = uiState.rightSwipeAction,
+                onLeftChange = viewModel::setLeftSwipeAction,
+                onRightChange = viewModel::setRightSwipeAction,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SwipeSection(
+    leftSwipeAction: SwipeAction,
+    rightSwipeAction: SwipeAction,
+    onLeftChange: (SwipeAction) -> Unit,
+    onRightChange: (SwipeAction) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("スワイプ操作", style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = "メイン画面で Issue カードを左右にスワイプしたときの動作。" +
+                "「削除」は close (not_planned)、「完了」は close (completed)、" +
+                "「Pending カラムに移動」は state=open に戻して \"Pending\" ラベルを付与します。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        SwipeActionDropdown(
+            label = "右スワイプ",
+            selected = rightSwipeAction,
+            onSelect = onRightChange,
+        )
+        SwipeActionDropdown(
+            label = "左スワイプ",
+            selected = leftSwipeAction,
+            onSelect = onLeftChange,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeActionDropdown(
+    label: String,
+    selected: SwipeAction,
+    onSelect: (SwipeAction) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = it },
+        ) {
+            OutlinedTextField(
+                value = selected.label,
+                onValueChange = {},
+                readOnly = true,
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
+            ) {
+                SwipeAction.entries.forEach { action ->
+                    DropdownMenuItem(
+                        text = { Text(action.label) },
+                        onClick = {
+                            onSelect(action)
+                            expanded = false
+                        },
+                    )
+                }
+            }
         }
     }
 }

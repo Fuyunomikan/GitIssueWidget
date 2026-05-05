@@ -1,9 +1,11 @@
 package com.example.gitissuewidget.data.repo
 
 import com.example.gitissuewidget.data.remote.GitHubApi
+import com.example.gitissuewidget.data.remote.dto.AddLabelsRequest
 import com.example.gitissuewidget.data.remote.dto.CreateIssueRequest
 import com.example.gitissuewidget.data.remote.dto.IssueDto
 import com.example.gitissuewidget.data.remote.dto.LabelDto
+import com.example.gitissuewidget.data.remote.dto.UpdateIssueRequest
 import com.example.gitissuewidget.data.remote.dto.UserDto
 import com.example.gitissuewidget.domain.Issue
 import com.example.gitissuewidget.domain.IssueFilter
@@ -47,6 +49,42 @@ class IssueRepository(private val api: GitHubApi) {
     suspend fun fetchAvailableLabels(repo: RepoRef): Result<List<Label>> = runCatching {
         api.listLabels(repo.owner, repo.name).map { it.toDomain() }
     }.mapHttpError()
+
+    /**
+     * @param stateReason "completed" or "not_planned"
+     */
+    suspend fun closeIssue(repo: RepoRef, number: Int, stateReason: String): Result<Issue> = runCatching {
+        val request = UpdateIssueRequest(state = "closed", stateReason = stateReason)
+        api.updateIssue(repo.owner, repo.name, number, request).toDomain(repo)
+    }.mapHttpError()
+
+    /**
+     * 「Pending カラムに移動」セマンティクス。
+     * Issue が closed なら open に戻し、既存ラベルを保ったまま `"Pending"` ラベルを追加する。
+     *
+     * 実装メモ: `PATCH /issues/{n}` の `labels` フィールドを使うと存在しないラベル名を
+     * GitHub が自動作成するため、リポジトリに事前に "Pending" ラベルが無くても動作する。
+     * 一方 `POST /issues/{n}/labels` は存在しないラベルでは 422 エラーになるので使わない。
+     * state 変更とラベル変更を 1 リクエストにまとめて API 呼び出しを 1 回に抑える。
+     */
+    suspend fun moveToPending(
+        repo: RepoRef,
+        number: Int,
+        currentState: IssueState,
+        currentLabels: List<String>,
+    ): Result<Unit> = runCatching {
+        val mergedLabels = (currentLabels + PENDING_LABEL).distinct()
+        val request = UpdateIssueRequest(
+            state = if (currentState == IssueState.CLOSED) "open" else null,
+            labels = mergedLabels,
+        )
+        api.updateIssue(repo.owner, repo.name, number, request)
+        Unit
+    }.mapHttpError()
+
+    companion object {
+        const val PENDING_LABEL = "Pending"
+    }
 
     private fun <T> Result<T>.mapHttpError(): Result<T> = recoverCatching { e ->
         when (e) {

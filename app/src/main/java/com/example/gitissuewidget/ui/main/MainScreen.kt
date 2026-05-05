@@ -1,6 +1,7 @@
 package com.example.gitissuewidget.ui.main
 
 import android.content.Intent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -24,12 +26,18 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -42,6 +50,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.gitissuewidget.domain.Issue
 import com.example.gitissuewidget.domain.IssueState
 import com.example.gitissuewidget.domain.Label
+import com.example.gitissuewidget.domain.SwipeAction
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,6 +62,9 @@ fun MainScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+
+    // Confirmation dialog state for COMPLETE (Done column move) — only this action requires confirmation.
+    var pendingComplete by remember { mutableStateOf<Pair<Issue, Boolean>?>(null) }
 
     // Refresh on every entry to MAIN (e.g., returning from NewIssue/Settings)
     LaunchedEffect(Unit) { viewModel.refresh() }
@@ -112,14 +124,51 @@ fun MainScreen(
                 uiState.issues.isEmpty() && !uiState.loading -> EmptyHint("Issueが見つかりません。")
                 else -> IssueList(
                     issues = uiState.issues,
+                    leftSwipeAction = uiState.leftSwipeAction,
+                    rightSwipeAction = uiState.rightSwipeAction,
                     onClickIssue = { issue ->
                         runCatching {
                             context.startActivity(Intent(Intent.ACTION_VIEW, issue.htmlUrl.toUri()))
                         }
                     },
+                    onSwipe = { issue, isLeft ->
+                        val action = if (isLeft) uiState.leftSwipeAction else uiState.rightSwipeAction
+                        if (action == SwipeAction.COMPLETE) {
+                            // Defer execution to confirmation dialog. Snap back the row.
+                            pendingComplete = issue to isLeft
+                            false
+                        } else {
+                            viewModel.applySwipeAction(issue, isLeft)
+                            true
+                        }
+                    },
                 )
             }
         }
+    }
+
+    val pending = pendingComplete
+    if (pending != null) {
+        val issue = pending.first
+        val isLeft = pending.second
+        AlertDialog(
+            onDismissRequest = { pendingComplete = null },
+            title = { Text("完了 (Done) に移動しますか?") },
+            text = {
+                Text("Issue を close (completed) します。\n\n#${issue.number} ${issue.title}")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.applySwipeAction(issue, isLeft)
+                        pendingComplete = null
+                    },
+                ) { Text("移動") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingComplete = null }) { Text("キャンセル") }
+            },
+        )
     }
 }
 
@@ -161,12 +210,104 @@ private fun EmptyHint(text: String) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun IssueList(issues: List<Issue>, onClickIssue: (Issue) -> Unit) {
+private fun IssueList(
+    issues: List<Issue>,
+    leftSwipeAction: SwipeAction,
+    rightSwipeAction: SwipeAction,
+    onClickIssue: (Issue) -> Unit,
+    onSwipe: (Issue, isLeftSwipe: Boolean) -> Boolean,
+) {
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(issues, key = { "${it.repoRef.fullName}#${it.number}" }) { issue ->
-            IssueRow(issue, onClick = { onClickIssue(issue) })
+            SwipeableIssueRow(
+                issue = issue,
+                leftSwipeAction = leftSwipeAction,
+                rightSwipeAction = rightSwipeAction,
+                onClick = { onClickIssue(issue) },
+                onSwipe = { isLeft -> onSwipe(issue, isLeft) },
+            )
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeableIssueRow(
+    issue: Issue,
+    leftSwipeAction: SwipeAction,
+    rightSwipeAction: SwipeAction,
+    onClick: () -> Unit,
+    /** Returns true to dismiss the row, false to snap back. */
+    onSwipe: (isLeftSwipe: Boolean) -> Boolean,
+) {
+    @Suppress("DEPRECATION") // confirmValueChange is used as an action hook;
+    // we let the caller decide via onSwipe whether to dismiss or snap back.
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            when (value) {
+                SwipeToDismissBoxValue.StartToEnd -> {
+                    if (rightSwipeAction != SwipeAction.NONE) onSwipe(false) else false
+                }
+                SwipeToDismissBoxValue.EndToStart -> {
+                    if (leftSwipeAction != SwipeAction.NONE) onSwipe(true) else false
+                }
+                SwipeToDismissBoxValue.Settled -> false
+            }
+        },
+    )
+    // When the issue is updated (PENDING action keeps the row in the list with new updatedAt),
+    // reset the swipe state so the row is visible again.
+    LaunchedEffect(issue.updatedAt) {
+        if (state.currentValue != SwipeToDismissBoxValue.Settled) {
+            state.reset()
+        }
+    }
+    SwipeToDismissBox(
+        state = state,
+        backgroundContent = {
+            val action = when (state.dismissDirection) {
+                SwipeToDismissBoxValue.StartToEnd -> rightSwipeAction
+                SwipeToDismissBoxValue.EndToStart -> leftSwipeAction
+                SwipeToDismissBoxValue.Settled -> SwipeAction.NONE
+            }
+            SwipeBackground(action, state.dismissDirection)
+        },
+        enableDismissFromStartToEnd = rightSwipeAction != SwipeAction.NONE,
+        enableDismissFromEndToStart = leftSwipeAction != SwipeAction.NONE,
+    ) {
+        IssueRow(issue, onClick = onClick)
+    }
+}
+
+@Composable
+private fun SwipeBackground(action: SwipeAction, direction: SwipeToDismissBoxValue) {
+    if (action == SwipeAction.NONE || direction == SwipeToDismissBoxValue.Settled) return
+    val color = when (action) {
+        SwipeAction.DELETE -> Color(0xFFD32F2F)
+        SwipeAction.COMPLETE -> Color(0xFF388E3C)
+        SwipeAction.PENDING -> Color(0xFFF57C00)
+        SwipeAction.NONE -> return
+    }
+    val alignment = if (direction == SwipeToDismissBoxValue.StartToEnd) {
+        Alignment.CenterStart
+    } else {
+        Alignment.CenterEnd
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(color)
+            .padding(horizontal = 20.dp),
+        contentAlignment = alignment,
+    ) {
+        Text(
+            text = action.label,
+            color = Color.White,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
