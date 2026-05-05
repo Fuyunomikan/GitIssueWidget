@@ -4,13 +4,13 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import com.example.gitissuewidget.ui.main.MainScreen
+import com.example.gitissuewidget.ui.settings.SettingsScreen
 import com.example.gitissuewidget.ui.theme.GitIssueWidgetTheme
 
 class MainActivity : ComponentActivity() {
@@ -19,29 +19,19 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             GitIssueWidgetTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
+                AppRoot()
             }
         }
     }
 }
 
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
+private enum class Screen { MAIN, SETTINGS }
 
-@Preview(showBackground = true)
 @Composable
-fun GreetingPreview() {
-    GitIssueWidgetTheme {
-        Greeting("Android")
+private fun AppRoot() {
+    var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
+    when (screen) {
+        Screen.MAIN -> MainScreen(onOpenSettings = { screen = Screen.SETTINGS })
+        Screen.SETTINGS -> SettingsScreen(onBack = { screen = Screen.MAIN })
     }
 }
