@@ -7,6 +7,8 @@ data class Issue(
     val state: IssueState,
     val labels: List<Label>,
     val updatedAt: String,
+    val createdAt: String,
+    val commentsCount: Int,
     val repoRef: RepoRef,
 )
 

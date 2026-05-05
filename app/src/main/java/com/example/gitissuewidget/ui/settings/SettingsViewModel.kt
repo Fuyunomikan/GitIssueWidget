@@ -25,6 +25,21 @@ data class SettingsUiState(
     val sortOption: SortOption = SortOption.UPDATED,
     val sortDirection: SortDirection = SortDirection.DESC,
     val perPage: Int = PreferenceStore.DEFAULT_PER_PAGE,
+    val showOpenBadge: Boolean = true,
+    val showLabels: Boolean = true,
+)
+
+private data class BasicPrefs(
+    val tokenSaved: Boolean,
+    val watchedRepos: List<RepoRef>,
+    val sortOption: SortOption,
+    val sortDirection: SortDirection,
+    val perPage: Int,
+)
+
+private data class DisplayPrefs(
+    val showOpenBadge: Boolean,
+    val showLabels: Boolean,
 )
 
 class SettingsViewModel(
@@ -34,19 +49,30 @@ class SettingsViewModel(
 
     private val tokenSaved = MutableStateFlow(tokenStore.hasToken())
 
-    val uiState: StateFlow<SettingsUiState> = combine(
+    private val basicFlow = combine(
         tokenSaved,
         preferenceStore.watchedRepos,
         preferenceStore.sortOption,
         preferenceStore.sortDirection,
         preferenceStore.perPage,
     ) { saved, repos, sort, direction, perPage ->
+        BasicPrefs(saved, repos, sort, direction, perPage)
+    }
+
+    private val displayFlow = combine(
+        preferenceStore.showOpenBadge,
+        preferenceStore.showLabels,
+    ) { open, labels -> DisplayPrefs(open, labels) }
+
+    val uiState: StateFlow<SettingsUiState> = combine(basicFlow, displayFlow) { basic, display ->
         SettingsUiState(
-            tokenSaved = saved,
-            watchedRepos = repos,
-            sortOption = sort,
-            sortDirection = direction,
-            perPage = perPage,
+            tokenSaved = basic.tokenSaved,
+            watchedRepos = basic.watchedRepos,
+            sortOption = basic.sortOption,
+            sortDirection = basic.sortDirection,
+            perPage = basic.perPage,
+            showOpenBadge = display.showOpenBadge,
+            showLabels = display.showLabels,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
@@ -99,6 +125,14 @@ class SettingsViewModel(
 
     fun setPerPage(value: Int) {
         viewModelScope.launch { preferenceStore.setPerPage(value) }
+    }
+
+    fun setShowOpenBadge(value: Boolean) {
+        viewModelScope.launch { preferenceStore.setShowOpenBadge(value) }
+    }
+
+    fun setShowLabels(value: Boolean) {
+        viewModelScope.launch { preferenceStore.setShowLabels(value) }
     }
 
     fun consumeMessage() {

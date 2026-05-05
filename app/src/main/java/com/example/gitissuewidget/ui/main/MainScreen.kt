@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
@@ -46,11 +47,15 @@ import com.example.gitissuewidget.domain.Label
 @Composable
 fun MainScreen(
     onOpenSettings: () -> Unit,
+    onCreateIssue: () -> Unit,
     viewModel: MainViewModel = viewModel(factory = MainViewModel.Factory),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+
+    // Refresh on every entry to MAIN (e.g., returning from NewIssue/Settings)
+    LaunchedEffect(Unit) { viewModel.refresh() }
 
     LaunchedEffect(uiState.errorMessage) {
         uiState.errorMessage?.let {
@@ -66,6 +71,12 @@ fun MainScreen(
                 actions = {
                     IconButton(onClick = viewModel::refresh, enabled = !uiState.loading) {
                         Icon(Icons.Filled.Refresh, contentDescription = "更新")
+                    }
+                    IconButton(
+                        onClick = onCreateIssue,
+                        enabled = uiState.tokenSet && uiState.watchedRepos.isNotEmpty(),
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = "Issue 作成")
                     }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = "設定")

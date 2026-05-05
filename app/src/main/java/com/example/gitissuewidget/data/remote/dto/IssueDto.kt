@@ -12,5 +12,7 @@ data class IssueDto(
     val state: String,
     val labels: List<LabelDto> = emptyList(),
     @SerialName("updated_at") val updatedAt: String,
+    @SerialName("created_at") val createdAt: String = "",
+    val comments: Int = 0,
     @SerialName("pull_request") val pullRequest: JsonElement? = null,
 )

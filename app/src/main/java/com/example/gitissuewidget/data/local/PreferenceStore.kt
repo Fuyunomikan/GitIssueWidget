@@ -3,6 +3,7 @@ package com.example.gitissuewidget.data.local
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -44,6 +45,9 @@ class PreferenceStore(context: Context) {
             ?: emptyList()
     }
 
+    val showOpenBadge: Flow<Boolean> = dataStore.data.map { it[KEY_SHOW_OPEN_BADGE] ?: true }
+    val showLabels: Flow<Boolean> = dataStore.data.map { it[KEY_SHOW_LABELS] ?: true }
+
     suspend fun setSortOption(value: SortOption) {
         dataStore.edit { it[KEY_SORT_OPTION] = value.name }
     }
@@ -76,12 +80,22 @@ class PreferenceStore(context: Context) {
         }
     }
 
+    suspend fun setShowOpenBadge(value: Boolean) {
+        dataStore.edit { it[KEY_SHOW_OPEN_BADGE] = value }
+    }
+
+    suspend fun setShowLabels(value: Boolean) {
+        dataStore.edit { it[KEY_SHOW_LABELS] = value }
+    }
+
     companion object {
         private val KEY_SORT_OPTION = stringPreferencesKey("sort_option")
         private val KEY_SORT_DIRECTION = stringPreferencesKey("sort_direction")
         private val KEY_PER_PAGE = intPreferencesKey("per_page")
         private val KEY_REFRESH_INTERVAL = intPreferencesKey("refresh_interval_minutes")
         private val KEY_WATCHED_REPOS = stringSetPreferencesKey("watched_repos")
+        private val KEY_SHOW_OPEN_BADGE = booleanPreferencesKey("show_open_badge")
+        private val KEY_SHOW_LABELS = booleanPreferencesKey("show_labels")
 
         const val DEFAULT_PER_PAGE = 20
         const val DEFAULT_REFRESH_INTERVAL = 30

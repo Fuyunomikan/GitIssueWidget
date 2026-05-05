@@ -61,6 +61,8 @@ class IssueCacheStore(context: Context) {
         val state: String,
         val labels: List<CachedLabel>,
         val updatedAt: String,
+        val createdAt: String = "",
+        val commentsCount: Int = 0,
         val repoOwner: String,
         val repoName: String,
     )
@@ -75,6 +77,8 @@ class IssueCacheStore(context: Context) {
         state = if (issue.state == IssueState.CLOSED) "closed" else "open",
         labels = issue.labels.map { CachedLabel(it.name, it.colorHex) },
         updatedAt = issue.updatedAt,
+        createdAt = issue.createdAt,
+        commentsCount = issue.commentsCount,
         repoOwner = issue.repoRef.owner,
         repoName = issue.repoRef.name,
     )
@@ -86,6 +90,8 @@ class IssueCacheStore(context: Context) {
         state = IssueState.fromApi(c.state),
         labels = c.labels.map { Label(it.name, it.color) },
         updatedAt = c.updatedAt,
+        createdAt = c.createdAt,
+        commentsCount = c.commentsCount,
         repoRef = RepoRef(c.repoOwner, c.repoName),
     )
 }

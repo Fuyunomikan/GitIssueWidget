@@ -26,6 +26,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -105,7 +106,51 @@ fun SettingsScreen(
                 onSortDirection = viewModel::setSortDirection,
                 onPerPage = viewModel::setPerPage,
             )
+            HorizontalDivider()
+            DisplaySection(
+                showOpenBadge = uiState.showOpenBadge,
+                showLabels = uiState.showLabels,
+                onShowOpenBadgeChange = viewModel::setShowOpenBadge,
+                onShowLabelsChange = viewModel::setShowLabels,
+            )
         }
+    }
+}
+
+@Composable
+private fun DisplaySection(
+    showOpenBadge: Boolean,
+    showLabels: Boolean,
+    onShowOpenBadgeChange: (Boolean) -> Unit,
+    onShowLabelsChange: (Boolean) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("ウィジェット表示項目", style = MaterialTheme.typography.titleMedium)
+        DisplayToggleRow(
+            label = "Open / Closed バッジ",
+            checked = showOpenBadge,
+            onCheckedChange = onShowOpenBadgeChange,
+        )
+        DisplayToggleRow(
+            label = "ラベル",
+            checked = showLabels,
+            onCheckedChange = onShowLabelsChange,
+        )
+    }
+}
+
+@Composable
+private fun DisplayToggleRow(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = label, modifier = Modifier.weight(1f))
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

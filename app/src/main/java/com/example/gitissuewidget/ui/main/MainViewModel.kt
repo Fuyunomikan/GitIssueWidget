@@ -37,10 +37,6 @@ class MainViewModel(
     private val _uiState = MutableStateFlow(MainUiState(tokenSet = tokenStore.hasToken()))
     val uiState: StateFlow<MainUiState> = _uiState.asStateFlow()
 
-    init {
-        refresh()
-    }
-
     fun refresh() {
         viewModelScope.launch {
             val hasToken = tokenStore.hasToken()

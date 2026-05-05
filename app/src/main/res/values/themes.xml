@@ -2,4 +2,10 @@
 <resources>
 
     <style name="Theme.GitIssueWidget" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <style name="Theme.GitIssueWidget.Transparent" parent="Theme.GitIssueWidget">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
 </resources>

@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import com.example.gitissuewidget.ui.main.MainScreen
+import com.example.gitissuewidget.ui.newissue.NewIssueScreen
 import com.example.gitissuewidget.ui.settings.SettingsScreen
 import com.example.gitissuewidget.ui.theme.GitIssueWidgetTheme
 
@@ -25,13 +26,20 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Screen { MAIN, SETTINGS }
+private enum class Screen { MAIN, SETTINGS, NEW_ISSUE }
 
 @Composable
 private fun AppRoot() {
     var screen by rememberSaveable { mutableStateOf(Screen.MAIN) }
     when (screen) {
-        Screen.MAIN -> MainScreen(onOpenSettings = { screen = Screen.SETTINGS })
+        Screen.MAIN -> MainScreen(
+            onOpenSettings = { screen = Screen.SETTINGS },
+            onCreateIssue = { screen = Screen.NEW_ISSUE },
+        )
         Screen.SETTINGS -> SettingsScreen(onBack = { screen = Screen.MAIN })
+        Screen.NEW_ISSUE -> NewIssueScreen(
+            onBack = { screen = Screen.MAIN },
+            onCreated = { screen = Screen.MAIN },
+        )
     }
 }

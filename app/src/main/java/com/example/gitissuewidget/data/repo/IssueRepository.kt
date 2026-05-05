@@ -1,6 +1,7 @@
 package com.example.gitissuewidget.data.repo
 
 import com.example.gitissuewidget.data.remote.GitHubApi
+import com.example.gitissuewidget.data.remote.dto.CreateIssueRequest
 import com.example.gitissuewidget.data.remote.dto.IssueDto
 import com.example.gitissuewidget.data.remote.dto.LabelDto
 import com.example.gitissuewidget.data.remote.dto.UserDto
@@ -31,6 +32,20 @@ class IssueRepository(private val api: GitHubApi) {
         )
             .filter { it.pullRequest == null }
             .map { it.toDomain(repo) }
+    }.mapHttpError()
+
+    suspend fun createIssue(
+        repo: RepoRef,
+        title: String,
+        body: String?,
+        labels: List<String>,
+    ): Result<Issue> = runCatching {
+        val request = CreateIssueRequest(title = title, body = body, labels = labels)
+        api.createIssue(repo.owner, repo.name, request).toDomain(repo)
+    }.mapHttpError()
+
+    suspend fun fetchAvailableLabels(repo: RepoRef): Result<List<Label>> = runCatching {
+        api.listLabels(repo.owner, repo.name).map { it.toDomain() }
     }.mapHttpError()
 
     private fun <T> Result<T>.mapHttpError(): Result<T> = recoverCatching { e ->
@@ -64,5 +79,7 @@ private fun IssueDto.toDomain(repo: RepoRef) = Issue(
     state = IssueState.fromApi(state),
     labels = labels.map { it.toDomain() },
     updatedAt = updatedAt,
+    createdAt = createdAt,
+    commentsCount = comments,
     repoRef = repo,
 )

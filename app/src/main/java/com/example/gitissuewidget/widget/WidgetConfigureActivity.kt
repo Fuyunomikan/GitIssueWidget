@@ -10,20 +10,26 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuAnchorType
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -86,14 +92,13 @@ class WidgetConfigureActivity : ComponentActivity() {
 
             val config = WidgetConfig(
                 appWidgetId = appWidgetId,
-                repoRef = draft.repoRef,
+                repoRefs = draft.repoRefs,
                 stateFilter = draft.stateFilter,
                 labels = draft.labels,
                 assigneeLogin = resolvedAssignee,
             )
             app.container.widgetConfigStore.saveConfig(config)
 
-            // Trigger immediate widget render for this id
             val mgr = GlanceAppWidgetManager(this@WidgetConfigureActivity)
             runCatching {
                 val glanceId = mgr.getGlanceIdBy(appWidgetId)
@@ -108,7 +113,7 @@ class WidgetConfigureActivity : ComponentActivity() {
 }
 
 private data class ConfigDraft(
-    val repoRef: RepoRef,
+    val repoRefs: List<RepoRef>,
     val stateFilter: IssueFilter.StateFilter,
     val labels: List<String>,
     val assigneeMe: Boolean,
@@ -127,7 +132,7 @@ private fun ConfigureScreen(
     var watchedRepos by remember { mutableStateOf<List<RepoRef>>(emptyList()) }
     var loaded by remember { mutableStateOf(false) }
 
-    var selectedRepo by remember { mutableStateOf<RepoRef?>(null) }
+    var selectedRepos by remember { mutableStateOf<List<RepoRef>>(emptyList()) }
     var stateFilter by remember { mutableStateOf(IssueFilter.StateFilter.OPEN) }
     var labelInput by remember { mutableStateOf("") }
     var assigneeMe by remember { mutableStateOf(false) }
@@ -136,19 +141,19 @@ private fun ConfigureScreen(
     LaunchedEffect(Unit) {
         val repos = app.container.preferenceStore.watchedRepos.first()
         val existing = app.container.widgetConfigStore.getConfig(appWidgetId)
-        // Restore previous values when reconfiguring
         if (existing != null) {
             hadExistingConfig = true
             stateFilter = existing.stateFilter
             labelInput = existing.labels.joinToString(", ")
             assigneeMe = existing.assigneeLogin != null
-            // Include existing repo even if user removed it from watched list
-            val merged = if (existing.repoRef !in repos) repos + existing.repoRef else repos
+            // Include existing repos even if removed from watched list
+            val merged = (repos + existing.repoRefs).distinct()
             watchedRepos = merged
-            selectedRepo = existing.repoRef
+            selectedRepos = existing.repoRefs
         } else {
             watchedRepos = repos
-            selectedRepo = repos.firstOrNull()
+            // Default: select all watched repos so widget shows everything
+            selectedRepos = repos
         }
         loaded = true
     }
@@ -189,10 +194,13 @@ private fun ConfigureScreen(
                 return@Column
             }
 
-            RepoPicker(
+            MultiSelectRepoDropdown(
                 repos = watchedRepos,
-                selected = selectedRepo,
-                onSelect = { selectedRepo = it },
+                selected = selectedRepos,
+                onToggle = { repo ->
+                    selectedRepos = if (repo in selectedRepos) selectedRepos - repo
+                    else selectedRepos + repo
+                },
             )
             HorizontalDivider()
             StateFilterPicker(
@@ -217,14 +225,13 @@ private fun ConfigureScreen(
                 OutlinedButton(onClick = onCancel) { Text("キャンセル") }
                 Button(
                     onClick = {
-                        val repo = selectedRepo ?: return@Button
                         val labels = labelInput
                             .split(',', '、')
                             .map { it.trim() }
                             .filter { it.isNotEmpty() }
-                        onSave(ConfigDraft(repo, stateFilter, labels, assigneeMe))
+                        onSave(ConfigDraft(selectedRepos, stateFilter, labels, assigneeMe))
                     },
-                    enabled = selectedRepo != null,
+                    enabled = selectedRepos.isNotEmpty(),
                 ) {
                     Text("完了")
                 }
@@ -233,33 +240,59 @@ private fun ConfigureScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun RepoPicker(
+private fun MultiSelectRepoDropdown(
     repos: List<RepoRef>,
-    selected: RepoRef?,
-    onSelect: (RepoRef) -> Unit,
+    selected: List<RepoRef>,
+    onToggle: (RepoRef) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("対象リポジトリ", style = MaterialTheme.typography.titleMedium)
-        repos.forEach { repo ->
-            Row(
+    var expanded by remember { mutableStateOf(false) }
+    Column {
+        Text("対象リポジトリ (複数選択可)", style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(4.dp))
+        ExposedDropdownMenuBox(
+            expanded = expanded,
+            onExpandedChange = { expanded = it },
+        ) {
+            OutlinedTextField(
+                value = formatSelectedRepos(selected),
+                onValueChange = {},
+                readOnly = true,
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .selectable(
-                        selected = repo == selected,
-                        onClick = { onSelect(repo) },
-                    )
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                    .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+            )
+            ExposedDropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false },
             ) {
-                RadioButton(
-                    selected = repo == selected,
-                    onClick = { onSelect(repo) },
-                )
-                Text(repo.fullName)
+                repos.forEach { repo ->
+                    val isSelected = repo in selected
+                    DropdownMenuItem(
+                        text = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(
+                                    checked = isSelected,
+                                    onCheckedChange = null,
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(repo.fullName)
+                            }
+                        },
+                        onClick = { onToggle(repo) },
+                    )
+                }
             }
         }
     }
+}
+
+private fun formatSelectedRepos(selected: List<RepoRef>): String = when (selected.size) {
+    0 -> ""
+    1 -> selected.first().fullName
+    else -> "${selected.first().fullName} +${selected.size - 1}"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

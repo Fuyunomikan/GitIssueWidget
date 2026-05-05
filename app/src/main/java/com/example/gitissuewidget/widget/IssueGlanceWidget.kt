@@ -1,5 +1,6 @@
 package com.example.gitissuewidget.widget
 
+import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
 import androidx.compose.ui.unit.dp
@@ -10,6 +11,7 @@ import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
 import androidx.glance.ImageProvider
+import androidx.glance.action.Action
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
@@ -42,9 +44,15 @@ import com.example.gitissuewidget.domain.Issue
 import com.example.gitissuewidget.domain.IssueFilter
 import com.example.gitissuewidget.domain.IssueState
 import com.example.gitissuewidget.domain.Label
+import com.example.gitissuewidget.domain.RepoRef
+import com.example.gitissuewidget.domain.SortDirection
+import com.example.gitissuewidget.domain.SortOption
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import androidx.compose.ui.graphics.Color as ComposeColor
 
@@ -59,12 +67,14 @@ class IssueGlanceWidget : GlanceAppWidget() {
         }.getOrNull()
         val widgetConfig = appWidgetId?.let { container.widgetConfigStore.getConfig(it) }
 
-        val repo = widgetConfig?.repoRef
-            ?: container.preferenceStore.watchedRepos.first().firstOrNull()
+        val repos: List<RepoRef> = widgetConfig?.repoRefs?.takeIf { it.isNotEmpty() }
+            ?: container.preferenceStore.watchedRepos.first()
 
         val sort = container.preferenceStore.sortOption.first()
         val direction = container.preferenceStore.sortDirection.first()
         val perPage = container.preferenceStore.perPage.first()
+        val showOpenBadge = container.preferenceStore.showOpenBadge.first()
+        val showLabels = container.preferenceStore.showLabels.first()
         val filter = IssueFilter(
             stateFilter = widgetConfig?.stateFilter ?: IssueFilter.StateFilter.OPEN,
             labels = widgetConfig?.labels.orEmpty(),
@@ -73,39 +83,78 @@ class IssueGlanceWidget : GlanceAppWidget() {
             direction = direction,
             perPage = perPage,
         )
+        val displayOptions = WidgetDisplayOptions(showOpenBadge = showOpenBadge, showLabels = showLabels)
 
         val state: WidgetState = when {
             !tokenSet -> WidgetState.NoToken
-            repo == null -> WidgetState.NoRepo
+            repos.isEmpty() -> WidgetState.NoRepo
             else -> {
-                val title = buildHeaderTitle(repo.fullName, filter)
-                container.issueRepository.fetchIssues(repo, filter).fold(
-                    onSuccess = { fresh ->
-                        appWidgetId?.let { container.issueCacheStore.save(it, fresh) }
-                        WidgetState.Loaded(title, fresh, staleSinceMillis = null)
-                    },
-                    onFailure = { error ->
-                        val cached = appWidgetId?.let { container.issueCacheStore.load(it) }
-                        if (cached != null && cached.issues.isNotEmpty()) {
-                            WidgetState.Loaded(title, cached.issues, staleSinceMillis = cached.savedAtMillis)
-                        } else {
-                            WidgetState.Error(repo.fullName, error.message ?: "取得エラー")
-                        }
-                    },
-                )
+                val title = buildHeaderTitle(repos, filter)
+                val results: List<Pair<RepoRef, Result<List<Issue>>>> = coroutineScope {
+                    repos.map { repo ->
+                        async { repo to container.issueRepository.fetchIssues(repo, filter) }
+                    }.awaitAll()
+                }
+                val successes = results.filter { it.second.isSuccess }
+                if (successes.isEmpty()) {
+                    val cached = appWidgetId?.let { container.issueCacheStore.load(it) }
+                    if (cached != null && cached.issues.isNotEmpty()) {
+                        WidgetState.Loaded(title, cached.issues, staleSinceMillis = cached.savedAtMillis)
+                    } else {
+                        val firstError = results.firstNotNullOfOrNull { it.second.exceptionOrNull() }
+                        WidgetState.Error(
+                            repoName = repos.first().fullName,
+                            message = firstError?.message ?: "取得エラー",
+                        )
+                    }
+                } else {
+                    val merged = successes
+                        .flatMap { it.second.getOrThrow() }
+                        .sortedByFilter(filter.sort, filter.direction)
+                        .take(filter.perPage)
+                    appWidgetId?.let { container.issueCacheStore.save(it, merged) }
+                    WidgetState.Loaded(title, merged, staleSinceMillis = null)
+                }
             }
         }
 
-        provideContent { WidgetContent(state) }
+        val editAction: Action? = appWidgetId?.let { id ->
+            val intent = Intent(context, WidgetQuickEditActivity::class.java)
+                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            actionStartActivity(intent)
+        }
+
+        provideContent { WidgetContent(state, displayOptions, editAction) }
     }
 }
 
-private fun buildHeaderTitle(repoFullName: String, filter: IssueFilter): String {
-    val parts = mutableListOf(repoFullName)
+private data class WidgetDisplayOptions(
+    val showOpenBadge: Boolean = true,
+    val showLabels: Boolean = true,
+)
+
+private fun buildHeaderTitle(repos: List<RepoRef>, filter: IssueFilter): String {
+    val repoLabel = when (repos.size) {
+        0 -> "GitHub Issue"
+        1 -> repos.first().fullName
+        else -> "${repos.first().fullName} +${repos.size - 1}"
+    }
+    val parts = mutableListOf(repoLabel)
     if (filter.stateFilter != IssueFilter.StateFilter.OPEN) parts += filter.stateFilter.apiValue
     if (filter.labels.isNotEmpty()) parts += filter.labels.joinToString(",")
     if (filter.assignee != null) parts += "@${filter.assignee}"
     return parts.joinToString(" · ")
+}
+
+private fun List<Issue>.sortedByFilter(sort: SortOption, direction: SortDirection): List<Issue> {
+    val asc = direction == SortDirection.ASC
+    val sorted = when (sort) {
+        SortOption.UPDATED -> sortedBy { it.updatedAt }
+        SortOption.CREATED -> sortedBy { it.createdAt }
+        SortOption.COMMENTS -> sortedBy { it.commentsCount }
+    }
+    return if (asc) sorted else sorted.reversed()
 }
 
 private sealed interface WidgetState {
@@ -120,7 +169,7 @@ private sealed interface WidgetState {
 }
 
 @androidx.compose.runtime.Composable
-private fun WidgetContent(state: WidgetState) {
+private fun WidgetContent(state: WidgetState, displayOptions: WidgetDisplayOptions, editAction: Action?) {
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
@@ -133,6 +182,7 @@ private fun WidgetContent(state: WidgetState) {
                 is WidgetState.Error -> state.repoName
                 else -> "GitHub Issue"
             },
+            editAction = editAction,
         )
         if (state is WidgetState.Loaded && state.staleSinceMillis != null) {
             StaleNotice(state.staleSinceMillis)
@@ -145,7 +195,8 @@ private fun WidgetContent(state: WidgetState) {
             is WidgetState.Loaded -> if (state.issues.isEmpty()) {
                 CenterMessage("Issueがありません")
             } else {
-                IssueListContent(state.issues)
+                val showRepoInRow = state.issues.map { it.repoRef }.distinct().size > 1
+                IssueListContent(state.issues, displayOptions, showRepoInRow)
             }
         }
     }
@@ -173,7 +224,7 @@ private fun StaleNotice(savedAtMillis: Long) {
 }
 
 @androidx.compose.runtime.Composable
-private fun Header(title: String) {
+private fun Header(title: String, editAction: Action?) {
     Row(
         modifier = GlanceModifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -188,6 +239,19 @@ private fun Header(title: String) {
             maxLines = 1,
             modifier = GlanceModifier.defaultWeight(),
         )
+        if (editAction != null) {
+            Image(
+                provider = ImageProvider(android.R.drawable.ic_menu_edit),
+                contentDescription = "編集",
+                colorFilter = ColorFilter.tint(
+                    ColorProvider(day = ComposeColor(0xFF555555), night = ComposeColor(0xFFCCCCCC)),
+                ),
+                modifier = GlanceModifier
+                    .size(20.dp)
+                    .clickable(editAction),
+            )
+            Spacer(GlanceModifier.width(8.dp))
+        }
         Image(
             provider = ImageProvider(android.R.drawable.ic_popup_sync),
             contentDescription = "更新",
@@ -202,16 +266,20 @@ private fun Header(title: String) {
 }
 
 @androidx.compose.runtime.Composable
-private fun IssueListContent(issues: List<Issue>) {
+private fun IssueListContent(
+    issues: List<Issue>,
+    displayOptions: WidgetDisplayOptions,
+    showRepoInRow: Boolean,
+) {
     LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
         items(issues, itemId = { "${it.repoRef.fullName}#${it.number}".hashCode().toLong() }) { issue ->
-            IssueRow(issue)
+            IssueRow(issue, displayOptions, showRepoInRow)
         }
     }
 }
 
 @androidx.compose.runtime.Composable
-private fun IssueRow(issue: Issue) {
+private fun IssueRow(issue: Issue, displayOptions: WidgetDisplayOptions, showRepoInRow: Boolean) {
     val openIntent = Intent(Intent.ACTION_VIEW, issue.htmlUrl.toUri())
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     Column(
@@ -221,10 +289,12 @@ private fun IssueRow(issue: Issue) {
             .clickable(actionStartActivity(openIntent)),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            StateBadge(issue.state)
-            Spacer(GlanceModifier.width(4.dp))
+            if (displayOptions.showOpenBadge) {
+                StateBadge(issue.state)
+                Spacer(GlanceModifier.width(4.dp))
+            }
             Text(
-                text = "#${issue.number}",
+                text = if (showRepoInRow) "${issue.repoRef.name} #${issue.number}" else "#${issue.number}",
                 style = TextStyle(
                     fontSize = 10.sp,
                     color = ColorProvider(day = ComposeColor(0xFF666666), night = ComposeColor(0xFFAAAAAA)),
@@ -240,7 +310,7 @@ private fun IssueRow(issue: Issue) {
             ),
             maxLines = 2,
         )
-        if (issue.labels.isNotEmpty()) {
+        if (displayOptions.showLabels && issue.labels.isNotEmpty()) {
             Row(modifier = GlanceModifier.padding(top = 2.dp)) {
                 issue.labels.take(3).forEach { label ->
                     LabelBadge(label)
