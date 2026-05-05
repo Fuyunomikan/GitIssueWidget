@@ -17,6 +17,7 @@ interface GitHubApi {
         @Path("repo") repo: String,
         @Query("state") state: String = "open",
         @Query("labels") labels: String? = null,
+        @Query("assignee") assignee: String? = null,
         @Query("sort") sort: String = "updated",
         @Query("direction") direction: String = "desc",
         @Query("per_page") perPage: Int = 20,

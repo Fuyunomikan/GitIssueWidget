@@ -24,6 +24,7 @@ class IssueRepository(private val api: GitHubApi) {
             repo = repo.name,
             state = filter.stateFilter.apiValue,
             labels = filter.labels.takeIf { it.isNotEmpty() }?.joinToString(","),
+            assignee = filter.assignee,
             sort = filter.sort.apiValue,
             direction = filter.direction.apiValue,
             perPage = filter.perPage,

@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">GitIssueWidget</string>
+    <string name="widget_description">監視リポジトリのIssueをホーム画面に表示</string>
+    <string name="widget_label">GitHub Issue</string>
 </resources>
