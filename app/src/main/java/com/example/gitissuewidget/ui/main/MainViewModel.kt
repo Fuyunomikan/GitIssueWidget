@@ -38,6 +38,8 @@ data class MainUiState(
     val selectedStateTab: IssueFilter.StateFilter = IssueFilter.StateFilter.OPEN,
     /** 期限 (DueDate) を Issue 行に表示するかの設定値。 */
     val showDueDate: Boolean = true,
+    /** 期限警告を出す残日数閾値。残日数 < この値（かつ 0 以上）で「あと〇日」を赤表示。 */
+    val dueDateWarningDays: Int = PreferenceStore.DEFAULT_DUE_DATE_WARNING_DAYS,
 )
 
 class MainViewModel(
@@ -63,6 +65,11 @@ class MainViewModel(
         viewModelScope.launch {
             preferenceStore.showDueDate.collect { value ->
                 _uiState.value = _uiState.value.copy(showDueDate = value)
+            }
+        }
+        viewModelScope.launch {
+            preferenceStore.dueDateWarningDays.collect { value ->
+                _uiState.value = _uiState.value.copy(dueDateWarningDays = value)
             }
         }
     }

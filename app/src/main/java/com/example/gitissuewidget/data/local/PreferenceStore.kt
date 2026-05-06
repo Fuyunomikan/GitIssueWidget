@@ -50,6 +50,15 @@ class PreferenceStore(context: Context) {
     val showLabels: Flow<Boolean> = dataStore.data.map { it[KEY_SHOW_LABELS] ?: true }
     val showDueDate: Flow<Boolean> = dataStore.data.map { it[KEY_SHOW_DUE_DATE] ?: true }
 
+    /**
+     * 期限日が近付いたときに「あと〇日」警告を出す閾値（日数）。
+     * 残日数がこの値未満（0 以上）の場合に赤文字の警告を表示する。
+     * 0 を指定すると警告を出さない扱いになる（残日数 0 未満＝過去日付は別表現）。
+     */
+    val dueDateWarningDays: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[KEY_DUE_DATE_WARNING_DAYS] ?: DEFAULT_DUE_DATE_WARNING_DAYS
+    }
+
     val leftSwipeAction: Flow<SwipeAction> = dataStore.data.map { prefs ->
         prefs[KEY_LEFT_SWIPE]?.let { runCatching { SwipeAction.valueOf(it) }.getOrNull() }
             ?: SwipeAction.NONE
@@ -126,6 +135,10 @@ class PreferenceStore(context: Context) {
         dataStore.edit { it[KEY_SHOW_DUE_DATE] = value }
     }
 
+    suspend fun setDueDateWarningDays(value: Int) {
+        dataStore.edit { it[KEY_DUE_DATE_WARNING_DAYS] = value.coerceAtLeast(0) }
+    }
+
     suspend fun setLeftSwipeAction(value: SwipeAction) {
         dataStore.edit { it[KEY_LEFT_SWIPE] = value.name }
     }
@@ -162,6 +175,7 @@ class PreferenceStore(context: Context) {
         private val KEY_SHOW_OPEN_BADGE = booleanPreferencesKey("show_open_badge")
         private val KEY_SHOW_LABELS = booleanPreferencesKey("show_labels")
         private val KEY_SHOW_DUE_DATE = booleanPreferencesKey("show_due_date")
+        private val KEY_DUE_DATE_WARNING_DAYS = intPreferencesKey("due_date_warning_days")
         private val KEY_LEFT_SWIPE = stringPreferencesKey("left_swipe_action")
         private val KEY_RIGHT_SWIPE = stringPreferencesKey("right_swipe_action")
         private val KEY_SWIPE_PROJECT_TITLE = stringPreferencesKey("swipe_project_title")
@@ -174,5 +188,6 @@ class PreferenceStore(context: Context) {
         const val DEFAULT_PENDING_COLUMN = "Pending"
         const val DEFAULT_DONE_COLUMN = "Done"
         const val DEFAULT_DUE_DATE_FIELD = "Due Date"
+        const val DEFAULT_DUE_DATE_WARNING_DAYS = 3
     }
 }

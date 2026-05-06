@@ -145,6 +145,7 @@ fun MainScreen(
                         leftSwipeAction = uiState.leftSwipeAction,
                         rightSwipeAction = uiState.rightSwipeAction,
                         showDueDate = uiState.showDueDate,
+                        dueDateWarningDays = uiState.dueDateWarningDays,
                         onClickIssue = { issue ->
                             runCatching {
                                 context.startActivity(Intent(Intent.ACTION_VIEW, issue.htmlUrl.toUri()))
@@ -280,6 +281,7 @@ private fun IssueList(
     leftSwipeAction: SwipeAction,
     rightSwipeAction: SwipeAction,
     showDueDate: Boolean,
+    dueDateWarningDays: Int,
     onClickIssue: (Issue) -> Unit,
     onSwipe: (Issue, isLeftSwipe: Boolean) -> Boolean,
 ) {
@@ -290,6 +292,7 @@ private fun IssueList(
                 leftSwipeAction = leftSwipeAction,
                 rightSwipeAction = rightSwipeAction,
                 showDueDate = showDueDate,
+                dueDateWarningDays = dueDateWarningDays,
                 onClick = { onClickIssue(issue) },
                 onSwipe = { isLeft -> onSwipe(issue, isLeft) },
             )
@@ -304,6 +307,7 @@ private fun SwipeableIssueRow(
     leftSwipeAction: SwipeAction,
     rightSwipeAction: SwipeAction,
     showDueDate: Boolean,
+    dueDateWarningDays: Int,
     onClick: () -> Unit,
     /** Returns true to dismiss the row, false to snap back. */
     onSwipe: (isLeftSwipe: Boolean) -> Boolean,
@@ -344,7 +348,12 @@ private fun SwipeableIssueRow(
         enableDismissFromStartToEnd = rightSwipeAction != SwipeAction.NONE,
         enableDismissFromEndToStart = leftSwipeAction != SwipeAction.NONE,
     ) {
-        IssueRow(issue, showDueDate = showDueDate, onClick = onClick)
+        IssueRow(
+            issue,
+            showDueDate = showDueDate,
+            dueDateWarningDays = dueDateWarningDays,
+            onClick = onClick,
+        )
     }
 }
 
@@ -379,7 +388,12 @@ private fun SwipeBackground(action: SwipeAction, direction: SwipeToDismissBoxVal
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun IssueRow(issue: Issue, showDueDate: Boolean, onClick: () -> Unit) {
+private fun IssueRow(
+    issue: Issue,
+    showDueDate: Boolean,
+    dueDateWarningDays: Int,
+    onClick: () -> Unit,
+) {
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
@@ -396,7 +410,7 @@ private fun IssueRow(issue: Issue, showDueDate: Boolean, onClick: () -> Unit) {
                 Text(text = "#${issue.number}", style = MaterialTheme.typography.labelSmall)
                 Text(text = issue.repoRef.fullName, style = MaterialTheme.typography.labelSmall)
                 if (showDueDate && !issue.dueDate.isNullOrBlank()) {
-                    DueDateChip(issue.dueDate)
+                    DueDateChip(issue.dueDate, dueDateWarningDays)
                 }
             }
             Text(
@@ -417,13 +431,26 @@ private fun IssueRow(issue: Issue, showDueDate: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun DueDateChip(dueDate: String) {
-    val past = isPastDue(dueDate)
-    Text(
-        text = formatDueDateLong(dueDate),
-        color = if (past) Color(0xFFB71C1C) else MaterialTheme.colorScheme.onSurfaceVariant,
-        style = MaterialTheme.typography.labelSmall,
-    )
+private fun DueDateChip(dueDate: String, warningDays: Int) {
+    val daysLeft = daysUntilDue(dueDate)
+    val past = daysLeft != null && daysLeft < 0
+    val warn = daysLeft != null && daysLeft >= 0 && warningDays > 0 && daysLeft < warningDays
+    val warnColor = Color(0xFFB71C1C)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = formatDueDateLong(dueDate),
+            color = if (past) warnColor else MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        if (warn) {
+            Text(
+                text = "あと${daysLeft}日",
+                color = warnColor,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
 }
 
 @Composable
@@ -461,3 +488,11 @@ private fun formatDueDateLong(iso: String): String = runCatching {
 private fun isPastDue(iso: String): Boolean = runCatching {
     java.time.LocalDate.parse(iso).isBefore(java.time.LocalDate.now())
 }.getOrDefault(false)
+
+/** 今日から期限日までの残日数。今日 = 0、明日 = 1、昨日 = -1。パース不能なら null。 */
+private fun daysUntilDue(iso: String): Int? = runCatching {
+    java.time.temporal.ChronoUnit.DAYS.between(
+        java.time.LocalDate.now(),
+        java.time.LocalDate.parse(iso),
+    ).toInt()
+}.getOrNull()

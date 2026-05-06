@@ -121,9 +121,11 @@ fun SettingsScreen(
                 showOpenBadge = uiState.showOpenBadge,
                 showLabels = uiState.showLabels,
                 showDueDate = uiState.showDueDate,
+                dueDateWarningDays = uiState.dueDateWarningDays,
                 onShowOpenBadgeChange = viewModel::setShowOpenBadge,
                 onShowLabelsChange = viewModel::setShowLabels,
                 onShowDueDateChange = viewModel::setShowDueDate,
+                onDueDateWarningDaysChange = viewModel::setDueDateWarningDays,
             )
             HorizontalDivider()
             SwipeSection(
@@ -328,9 +330,9 @@ private fun SwipeActionDropdown(
 /**
  * Project のカラム名 / フィールド名を編集する Composable。
  * - [options] が空 → 通常の OutlinedTextField (手入力のみ。Project 未取得 / オフライン時のフォールバック)
- * - [options] が非空 → プルダウンから選択 + 手入力も可能 (typed なので候補にない値も保存できる)
+ * - [options] が非空 → プルダウンから選択のみ (`readOnly` + `PrimaryNotEditable` でキーボード非表示)
  *
- * 入力ごとに [onValueChange] を即時呼び出すため、PreferenceStore に逐次反映される。
+ * 候補からのみ選ぶ仕様にすることでカラム名タイプミスを防止し、設定画面でのキーボード暴発も抑制する。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -341,10 +343,8 @@ private fun ColumnNameDropdown(
     onValueChange: (String) -> Unit,
     supportingText: String? = null,
 ) {
-    var draft by remember(value) { mutableStateOf(value) }
-    var expanded by remember { mutableStateOf(false) }
-
     if (options.isEmpty()) {
+        var draft by remember(value) { mutableStateOf(value) }
         OutlinedTextField(
             value = draft,
             onValueChange = {
@@ -359,23 +359,22 @@ private fun ColumnNameDropdown(
         return
     }
 
+    var expanded by remember { mutableStateOf(false) }
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { expanded = it },
     ) {
         OutlinedTextField(
-            value = draft,
-            onValueChange = {
-                draft = it
-                onValueChange(it)
-            },
+            value = value,
+            onValueChange = {},
+            readOnly = true,
             label = { Text(label) },
             singleLine = true,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
             supportingText = supportingText?.let { { Text(it) } },
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable),
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
         )
         ExposedDropdownMenu(
             expanded = expanded,
@@ -385,7 +384,6 @@ private fun ColumnNameDropdown(
                 DropdownMenuItem(
                     text = { Text(option) },
                     onClick = {
-                        draft = option
                         onValueChange(option)
                         expanded = false
                     },
@@ -400,9 +398,11 @@ private fun DisplaySection(
     showOpenBadge: Boolean,
     showLabels: Boolean,
     showDueDate: Boolean,
+    dueDateWarningDays: Int,
     onShowOpenBadgeChange: (Boolean) -> Unit,
     onShowLabelsChange: (Boolean) -> Unit,
     onShowDueDateChange: (Boolean) -> Unit,
+    onDueDateWarningDaysChange: (Int) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("ウィジェット表示項目", style = MaterialTheme.typography.titleMedium)
@@ -421,6 +421,23 @@ private fun DisplaySection(
             checked = showDueDate,
             onCheckedChange = onShowDueDateChange,
         )
+
+        Spacer(Modifier.height(4.dp))
+        Text("期限警告 (あと〇日)", style = MaterialTheme.typography.labelLarge)
+        Text(
+            text = "残日数がこの値未満の場合、期日表示の横に「あと〇日」を赤文字で表示します。" +
+                "「なし」を選ぶと警告しません。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(0, 1, 3, 5, 7, 14).forEach { days ->
+                FilterChip(
+                    selected = days == dueDateWarningDays,
+                    onClick = { onDueDateWarningDaysChange(days) },
+                    label = { Text(if (days == 0) "なし" else "${days}日") },
+                )
+            }
+        }
     }
 }
 

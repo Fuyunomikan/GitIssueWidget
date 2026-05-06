@@ -31,6 +31,7 @@ data class SettingsUiState(
     val showOpenBadge: Boolean = true,
     val showLabels: Boolean = true,
     val showDueDate: Boolean = true,
+    val dueDateWarningDays: Int = PreferenceStore.DEFAULT_DUE_DATE_WARNING_DAYS,
     val leftSwipeAction: SwipeAction = SwipeAction.NONE,
     val rightSwipeAction: SwipeAction = SwipeAction.NONE,
     val swipeProjectTitle: String = "",
@@ -51,6 +52,7 @@ private data class DisplayPrefs(
     val showOpenBadge: Boolean,
     val showLabels: Boolean,
     val showDueDate: Boolean,
+    val dueDateWarningDays: Int,
 )
 
 private data class SwipePrefs(
@@ -87,7 +89,8 @@ class SettingsViewModel(
         preferenceStore.showOpenBadge,
         preferenceStore.showLabels,
         preferenceStore.showDueDate,
-    ) { open, labels, due -> DisplayPrefs(open, labels, due) }
+        preferenceStore.dueDateWarningDays,
+    ) { open, labels, due, warnDays -> DisplayPrefs(open, labels, due, warnDays) }
 
     private val swipeFlow = combine(
         preferenceStore.leftSwipeAction,
@@ -118,6 +121,7 @@ class SettingsViewModel(
             showOpenBadge = display.showOpenBadge,
             showLabels = display.showLabels,
             showDueDate = display.showDueDate,
+            dueDateWarningDays = display.dueDateWarningDays,
             leftSwipeAction = swipe.left,
             rightSwipeAction = swipe.right,
             swipeProjectTitle = project.swipeProjectTitle,
@@ -202,6 +206,10 @@ class SettingsViewModel(
 
     fun setShowDueDate(value: Boolean) {
         viewModelScope.launch { preferenceStore.setShowDueDate(value) }
+    }
+
+    fun setDueDateWarningDays(value: Int) {
+        viewModelScope.launch { preferenceStore.setDueDateWarningDays(value) }
     }
 
     fun setLeftSwipeAction(value: SwipeAction) {

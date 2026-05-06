@@ -76,6 +76,7 @@ class IssueGlanceWidget : GlanceAppWidget() {
         val showOpenBadge = container.preferenceStore.showOpenBadge.first()
         val showLabels = container.preferenceStore.showLabels.first()
         val showDueDate = container.preferenceStore.showDueDate.first()
+        val dueDateWarningDays = container.preferenceStore.dueDateWarningDays.first()
         val dueDateFieldName = container.preferenceStore.dueDateFieldName.first()
         val filter = IssueFilter(
             stateFilter = widgetConfig?.stateFilter ?: IssueFilter.StateFilter.OPEN,
@@ -89,6 +90,7 @@ class IssueGlanceWidget : GlanceAppWidget() {
             showOpenBadge = showOpenBadge,
             showLabels = showLabels,
             showDueDate = showDueDate,
+            dueDateWarningDays = dueDateWarningDays,
         )
 
         // Project mode takes precedence: if widgetConfig.projectTitle is set, fetch project items.
@@ -127,6 +129,8 @@ private data class WidgetDisplayOptions(
     val showOpenBadge: Boolean = true,
     val showLabels: Boolean = true,
     val showDueDate: Boolean = true,
+    /** 残日数 < この値（かつ 0 以上）で「あと〇日」を赤表示。0 なら警告しない。 */
+    val dueDateWarningDays: Int = 3,
 )
 
 private suspend fun loadRepositoryMode(
@@ -447,6 +451,12 @@ private fun IssueRow(issue: Issue, displayOptions: WidgetDisplayOptions, showRep
             if (displayOptions.showDueDate && !issue.dueDate.isNullOrBlank()) {
                 Spacer(GlanceModifier.width(6.dp))
                 DueDateBadge(issue.dueDate)
+                val daysLeft = daysUntilDue(issue.dueDate)
+                val warningDays = displayOptions.dueDateWarningDays
+                if (daysLeft != null && daysLeft >= 0 && warningDays > 0 && daysLeft < warningDays) {
+                    Spacer(GlanceModifier.width(3.dp))
+                    DueWarningBadge(daysLeft)
+                }
             }
         }
         Text(
@@ -479,6 +489,24 @@ private fun DueDateBadge(dueDate: String) {
         style = TextStyle(
             fontSize = 10.sp,
             color = ColorProvider(day = fgDay, night = fgNight),
+        ),
+        maxLines = 1,
+    )
+}
+
+/**
+ * 期限間近警告のインラインバッジ。「あと〇日」を太字赤で 1 行表示する。
+ * 親 [Row] にフラットに置かれることを想定（Glance はネスト Row/Column が増えるとレイアウト制約が
+ * 厳しくなり警告テキストが見切れる場合があるため、[DueDateBadge] と兄弟として並べる）。
+ */
+@androidx.compose.runtime.Composable
+private fun DueWarningBadge(daysLeft: Int) {
+    Text(
+        text = "あと${daysLeft}日",
+        style = TextStyle(
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = ColorProvider(day = ComposeColor(0xFFB71C1C), night = ComposeColor(0xFFEF9A9A)),
         ),
         maxLines = 1,
     )
@@ -570,6 +598,14 @@ private fun formatDueDateLong(iso: String): String = runCatching {
 private fun isPastDue(iso: String): Boolean = runCatching {
     java.time.LocalDate.parse(iso).isBefore(java.time.LocalDate.now())
 }.getOrDefault(false)
+
+/** 今日から期限日までの残日数。今日 = 0、明日 = 1、昨日 = -1。パース不能なら null。 */
+private fun daysUntilDue(iso: String): Int? = runCatching {
+    java.time.temporal.ChronoUnit.DAYS.between(
+        java.time.LocalDate.now(),
+        java.time.LocalDate.parse(iso),
+    ).toInt()
+}.getOrNull()
 
 class RefreshAction : ActionCallback {
     override suspend fun onAction(
