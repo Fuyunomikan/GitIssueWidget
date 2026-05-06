@@ -25,6 +25,7 @@ class WidgetConfigStore(context: Context) {
             prefs.remove(legacyRepoKey(config.appWidgetId))
             prefs[stateKey(config.appWidgetId)] = config.stateFilter.name
             prefs[labelsKey(config.appWidgetId)] = config.labels.toSet()
+            prefs[labelFilterModeKey(config.appWidgetId)] = config.labelFilterMode.name
             if (!config.assigneeLogin.isNullOrBlank()) {
                 prefs[assigneeKey(config.appWidgetId)] = config.assigneeLogin
             } else {
@@ -59,12 +60,16 @@ class WidgetConfigStore(context: Context) {
             ?.let { runCatching { IssueFilter.StateFilter.valueOf(it) }.getOrNull() }
             ?: IssueFilter.StateFilter.OPEN
         val labels = prefs[labelsKey(appWidgetId)]?.toList().orEmpty()
+        val labelFilterMode = prefs[labelFilterModeKey(appWidgetId)]
+            ?.let { runCatching { WidgetConfig.LabelFilterMode.valueOf(it) }.getOrNull() }
+            ?: WidgetConfig.LabelFilterMode.AND
         val assignee = prefs[assigneeKey(appWidgetId)]
         return WidgetConfig(
             appWidgetId = appWidgetId,
             repoRefs = repos,
             stateFilter = state,
             labels = labels,
+            labelFilterMode = labelFilterMode,
             assigneeLogin = assignee,
             projectTitle = projectTitle,
             projectColumnName = projectColumn,
@@ -77,6 +82,7 @@ class WidgetConfigStore(context: Context) {
             prefs.remove(legacyRepoKey(appWidgetId))
             prefs.remove(stateKey(appWidgetId))
             prefs.remove(labelsKey(appWidgetId))
+            prefs.remove(labelFilterModeKey(appWidgetId))
             prefs.remove(assigneeKey(appWidgetId))
             prefs.remove(projectTitleKey(appWidgetId))
             prefs.remove(projectColumnKey(appWidgetId))
@@ -87,6 +93,7 @@ class WidgetConfigStore(context: Context) {
     private fun legacyRepoKey(id: Int) = stringPreferencesKey("widget_${id}_repo")
     private fun stateKey(id: Int) = stringPreferencesKey("widget_${id}_state")
     private fun labelsKey(id: Int) = stringSetPreferencesKey("widget_${id}_labels")
+    private fun labelFilterModeKey(id: Int) = stringPreferencesKey("widget_${id}_label_filter_mode")
     private fun assigneeKey(id: Int) = stringPreferencesKey("widget_${id}_assignee")
     private fun projectTitleKey(id: Int) = stringPreferencesKey("widget_${id}_project_title")
     private fun projectColumnKey(id: Int) = stringPreferencesKey("widget_${id}_project_column")

@@ -17,6 +17,7 @@ data class WidgetConfig(
     val repoRefs: List<RepoRef>,
     val stateFilter: IssueFilter.StateFilter = IssueFilter.StateFilter.OPEN,
     val labels: List<String> = emptyList(),
+    val labelFilterMode: LabelFilterMode = LabelFilterMode.AND,
     val assigneeLogin: String? = null,
     val projectTitle: String? = null,
     val projectColumnName: String? = null,
@@ -24,11 +25,21 @@ data class WidgetConfig(
     /** Project モードで動作するかどうか。 */
     val isProjectMode: Boolean get() = !projectTitle.isNullOrBlank()
 
+    /**
+     * 通常ラベル群の結合方法。`LABEL_NONE` (ラベルなし) は常にこれと OR で結合される。
+     * - [AND]: 指定したラベルをすべて持つ Issue のみ通す（GitHub REST API のデフォルト挙動と同じ）
+     * - [OR]: 指定したラベルのいずれかを持つ Issue を通す（クライアント側でフィルタ）
+     */
+    enum class LabelFilterMode(val displayName: String) {
+        AND("AND (すべて一致)"),
+        OR("OR (いずれか一致)"),
+    }
+
     companion object {
         /**
          * [labels] に含めると「ラベルが 1 つも付いていない Issue」を表示対象に加えるための予約名。
          * 通常のラベル名と衝突しないよう `__` で囲んでいる。
-         * フィルタロジックは `(通常ラベルすべて満たす) OR (この予約名 AND ラベル空)`。
+         * [LabelFilterMode] に関わらず常に OR で結合される。
          */
         const val LABEL_NONE = "__NO_LABEL__"
 

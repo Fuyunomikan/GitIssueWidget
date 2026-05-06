@@ -95,6 +95,7 @@ class WidgetConfigureActivity : ComponentActivity() {
                 repoRefs = draft.repoRefs,
                 stateFilter = draft.stateFilter,
                 labels = draft.labels,
+                labelFilterMode = draft.labelFilterMode,
                 assigneeLogin = resolvedAssignee,
                 projectTitle = draft.projectTitle.takeIf { it.isNotBlank() },
                 projectColumnName = draft.projectColumnName.takeIf { it.isNotBlank() },
@@ -118,6 +119,7 @@ private data class ConfigDraft(
     val repoRefs: List<RepoRef>,
     val stateFilter: IssueFilter.StateFilter,
     val labels: List<String>,
+    val labelFilterMode: WidgetConfig.LabelFilterMode,
     val assigneeMe: Boolean,
     val projectTitle: String,
     val projectColumnName: String,
@@ -140,6 +142,7 @@ private fun ConfigureScreen(
     var stateFilter by remember { mutableStateOf(IssueFilter.StateFilter.OPEN) }
     var labelInput by remember { mutableStateOf("") }
     var includeUnlabeled by remember { mutableStateOf(false) }
+    var labelFilterMode by remember { mutableStateOf(WidgetConfig.LabelFilterMode.AND) }
     var assigneeMe by remember { mutableStateOf(false) }
     var hadExistingConfig by remember { mutableStateOf(false) }
     var projectTitle by remember { mutableStateOf("") }
@@ -155,6 +158,7 @@ private fun ConfigureScreen(
             val (specials, normals) = existing.labels.partition { it == WidgetConfig.LABEL_NONE }
             labelInput = normals.joinToString(", ")
             includeUnlabeled = specials.isNotEmpty()
+            labelFilterMode = existing.labelFilterMode
             assigneeMe = existing.assigneeLogin != null
             projectTitle = existing.projectTitle.orEmpty()
             projectColumn = existing.projectColumnName.orEmpty()
@@ -232,6 +236,8 @@ private fun ConfigureScreen(
                 onValueChange = { labelInput = it },
                 includeUnlabeled = includeUnlabeled,
                 onIncludeUnlabeledChange = { includeUnlabeled = it },
+                filterMode = labelFilterMode,
+                onFilterModeChange = { labelFilterMode = it },
             )
             HorizontalDivider()
             AssigneeToggle(
@@ -257,6 +263,7 @@ private fun ConfigureScreen(
                                 repoRefs = selectedRepos,
                                 stateFilter = stateFilter,
                                 labels = labels,
+                                labelFilterMode = labelFilterMode,
                                 assigneeMe = assigneeMe,
                                 projectTitle = projectTitle.trim(),
                                 projectColumnName = projectColumn.trim(),
@@ -386,6 +393,8 @@ private fun LabelInput(
     onValueChange: (String) -> Unit,
     includeUnlabeled: Boolean,
     onIncludeUnlabeledChange: (Boolean) -> Unit,
+    filterMode: WidgetConfig.LabelFilterMode,
+    onFilterModeChange: (WidgetConfig.LabelFilterMode) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("ラベル絞り込み", style = MaterialTheme.typography.titleMedium)
@@ -402,6 +411,29 @@ private fun LabelInput(
         ) {
             Text(text = "ラベルなしも含める", modifier = Modifier.weight(1f))
             Switch(checked = includeUnlabeled, onCheckedChange = onIncludeUnlabeledChange)
+        }
+        LabelFilterModePicker(mode = filterMode, onSelect = onFilterModeChange)
+    }
+}
+
+@Composable
+private fun LabelFilterModePicker(
+    mode: WidgetConfig.LabelFilterMode,
+    onSelect: (WidgetConfig.LabelFilterMode) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = "複数ラベルの結合",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            WidgetConfig.LabelFilterMode.values().forEach { m ->
+                FilterChip(
+                    selected = m == mode,
+                    onClick = { onSelect(m) },
+                    label = { Text(m.displayName) },
+                )
+            }
         }
     }
 }

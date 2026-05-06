@@ -6,6 +6,8 @@ import android.content.Intent
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.glance.ColorFilter
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
@@ -23,6 +25,9 @@ import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.lazy.LazyColumn
 import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
+import androidx.glance.appwidget.state.getAppWidgetState
+import androidx.glance.appwidget.state.updateAppWidgetState
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.glance.background
 import androidx.glance.color.ColorProvider
 import androidx.glance.layout.Alignment
@@ -59,57 +64,72 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import androidx.compose.ui.graphics.Color as ComposeColor
 
+/**
+ * 更新中フラグ。[RefreshAction] がユーザータップ時に true をセットし、
+ * その状態で [IssueGlanceWidget.provideGlance] を呼ぶとネットワーク fetch を
+ * スキップして既存キャッシュ + 「更新中…」インジケーターのみ即時表示する。
+ * クリア後にもう一度 update() を呼んで通常の fetch 経路に乗る。
+ */
+internal val WIDGET_REFRESHING_KEY = booleanPreferencesKey("widget_refreshing")
+
 class IssueGlanceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val container = (context.applicationContext as IssueWidgetApp).container
-        val tokenSet = container.tokenStore.hasToken()
 
         val appWidgetId = runCatching {
             GlanceAppWidgetManager(context).getAppWidgetId(id)
         }.getOrNull()
-        val widgetConfig = appWidgetId?.let { container.widgetConfigStore.getConfig(it) }
 
-        val sort = container.preferenceStore.sortOption.first()
-        val direction = container.preferenceStore.sortDirection.first()
-        val perPage = container.preferenceStore.perPage.first()
-        val showOpenBadge = container.preferenceStore.showOpenBadge.first()
-        val showLabels = container.preferenceStore.showLabels.first()
-        val showDueDate = container.preferenceStore.showDueDate.first()
-        val dueDateWarningDays = container.preferenceStore.dueDateWarningDays.first()
-        val dueDateFieldName = container.preferenceStore.dueDateFieldName.first()
+        val refreshing = runCatching {
+            getAppWidgetState(context, PreferencesGlanceStateDefinition, id)[WIDGET_REFRESHING_KEY] ?: false
+        }.getOrDefault(false)
+
+        // tokenSet / widgetConfig / 各種 PreferenceStore.first() を並列読み出し。
+        // 各 DataStore 読み出しは IO を伴うので逐次実行すると合計で数十〜百ms以上かかることがある。
+        val tokenSet: Boolean
+        val widgetConfig: WidgetConfig?
+        val prefs: WidgetPrefs
+        coroutineScope {
+            val tokenSetDef = async { container.tokenStore.hasToken() }
+            val widgetConfigDef = async { appWidgetId?.let { container.widgetConfigStore.getConfig(it) } }
+            val prefsDef = async { loadWidgetPrefs(container) }
+            tokenSet = tokenSetDef.await()
+            widgetConfig = widgetConfigDef.await()
+            prefs = prefsDef.await()
+        }
+
         val filter = IssueFilter(
             stateFilter = widgetConfig?.stateFilter ?: IssueFilter.StateFilter.OPEN,
             labels = widgetConfig?.labels.orEmpty(),
             assignee = widgetConfig?.assigneeLogin,
-            sort = sort,
-            direction = direction,
-            perPage = perPage,
+            sort = prefs.sort,
+            direction = prefs.direction,
+            perPage = prefs.perPage,
         )
         val displayOptions = WidgetDisplayOptions(
-            showOpenBadge = showOpenBadge,
-            showLabels = showLabels,
-            showDueDate = showDueDate,
-            dueDateWarningDays = dueDateWarningDays,
+            showOpenBadge = prefs.showOpenBadge,
+            showLabels = prefs.showLabels,
+            showDueDate = prefs.showDueDate,
+            dueDateWarningDays = prefs.dueDateWarningDays,
         )
 
-        // Project mode takes precedence: if widgetConfig.projectTitle is set, fetch project items.
-        // Otherwise fall back to repository-based fetch.
-        val state: WidgetState = when {
-            !tokenSet -> WidgetState.NoToken
-            widgetConfig != null && widgetConfig.isProjectMode ->
-                loadProjectMode(container, widgetConfig, filter, appWidgetId, dueDateFieldName)
-            else -> {
-                val repos: List<RepoRef> = widgetConfig?.repoRefs?.takeIf { it.isNotEmpty() }
-                    ?: container.preferenceStore.watchedRepos.first()
-                if (repos.isEmpty()) WidgetState.NoRepo
-                else loadRepositoryMode(container, repos, filter, appWidgetId)
-            }
-        }
+        val labelFilterMode = widgetConfig?.labelFilterMode ?: WidgetConfig.LabelFilterMode.AND
 
-        val configureAction: Action? = appWidgetId?.let { id ->
+        val state: WidgetState = resolveWidgetState(
+            container = container,
+            refreshing = refreshing,
+            tokenSet = tokenSet,
+            widgetConfig = widgetConfig,
+            filter = filter,
+            labelFilterMode = labelFilterMode,
+            appWidgetId = appWidgetId,
+            dueDateFieldName = prefs.dueDateFieldName,
+        )
+
+        val configureAction: Action? = appWidgetId?.let { wid ->
             val intent = Intent(context, WidgetQuickEditActivity::class.java)
-                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, wid)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             actionStartActivity(intent)
         }
@@ -121,8 +141,92 @@ class IssueGlanceWidget : GlanceAppWidget() {
             actionStartActivity(intent)
         }
 
-        provideContent { WidgetContent(state, displayOptions, addIssueAction, configureAction) }
+        provideContent {
+            WidgetContent(state, displayOptions, addIssueAction, configureAction, refreshing)
+        }
     }
+}
+
+/** [provideGlance] が必要とする PreferenceStore 値の束。並列読み出し用。 */
+private data class WidgetPrefs(
+    val sort: SortOption,
+    val direction: SortDirection,
+    val perPage: Int,
+    val showOpenBadge: Boolean,
+    val showLabels: Boolean,
+    val showDueDate: Boolean,
+    val dueDateWarningDays: Int,
+    val dueDateFieldName: String,
+)
+
+private suspend fun loadWidgetPrefs(container: com.example.gitissuewidget.AppContainer): WidgetPrefs =
+    coroutineScope {
+        val sort = async { container.preferenceStore.sortOption.first() }
+        val direction = async { container.preferenceStore.sortDirection.first() }
+        val perPage = async { container.preferenceStore.perPage.first() }
+        val showOpenBadge = async { container.preferenceStore.showOpenBadge.first() }
+        val showLabels = async { container.preferenceStore.showLabels.first() }
+        val showDueDate = async { container.preferenceStore.showDueDate.first() }
+        val dueDateWarningDays = async { container.preferenceStore.dueDateWarningDays.first() }
+        val dueDateFieldName = async { container.preferenceStore.dueDateFieldName.first() }
+        WidgetPrefs(
+            sort = sort.await(),
+            direction = direction.await(),
+            perPage = perPage.await(),
+            showOpenBadge = showOpenBadge.await(),
+            showLabels = showLabels.await(),
+            showDueDate = showDueDate.await(),
+            dueDateWarningDays = dueDateWarningDays.await(),
+            dueDateFieldName = dueDateFieldName.await(),
+        )
+    }
+
+/**
+ * モード分岐 + refreshing 高速パスをまとめたヘルパー。
+ * - [refreshing] = true のときは Project / Repository 共にネットワーク呼び出しをスキップし、
+ *   タイトル + 既存キャッシュ Issue のみで [WidgetState.Loaded] を返す（StaleNotice は出さない）。
+ * - 通常時は従来どおり `loadProjectMode` / `loadRepositoryMode` で fetch する。
+ */
+private suspend fun resolveWidgetState(
+    container: com.example.gitissuewidget.AppContainer,
+    refreshing: Boolean,
+    tokenSet: Boolean,
+    widgetConfig: WidgetConfig?,
+    filter: IssueFilter,
+    labelFilterMode: WidgetConfig.LabelFilterMode,
+    appWidgetId: Int?,
+    dueDateFieldName: String,
+): WidgetState {
+    if (!tokenSet) return WidgetState.NoToken
+    val isProjectMode = widgetConfig != null && widgetConfig.isProjectMode
+
+    if (refreshing) {
+        val title: String = if (isProjectMode) {
+            buildProjectHeaderTitle(widgetConfig!!, filter)
+        } else {
+            val repos = widgetConfig?.repoRefs?.takeIf { it.isNotEmpty() }
+                ?: container.preferenceStore.watchedRepos.first()
+            if (repos.isEmpty()) return WidgetState.NoRepo
+            buildHeaderTitle(repos, filter, labelFilterMode)
+        }
+        val cached = appWidgetId?.let { container.issueCacheStore.load(it) }
+        // refreshing 中はキャッシュをそのまま見せ、StaleNotice は出さない（古い表記が混乱の元になるため）。
+        // 「更新中…」表示は Header 側で担う。
+        return WidgetState.Loaded(
+            title = title,
+            issues = cached?.issues.orEmpty(),
+            staleSinceMillis = null,
+        )
+    }
+
+    if (isProjectMode) {
+        return loadProjectMode(container, widgetConfig!!, filter, appWidgetId, dueDateFieldName)
+    }
+
+    val repos = widgetConfig?.repoRefs?.takeIf { it.isNotEmpty() }
+        ?: container.preferenceStore.watchedRepos.first()
+    if (repos.isEmpty()) return WidgetState.NoRepo
+    return loadRepositoryMode(container, repos, filter, labelFilterMode, appWidgetId)
 }
 
 private data class WidgetDisplayOptions(
@@ -137,12 +241,27 @@ private suspend fun loadRepositoryMode(
     container: com.example.gitissuewidget.AppContainer,
     repos: List<RepoRef>,
     filter: IssueFilter,
+    labelFilterMode: WidgetConfig.LabelFilterMode,
     appWidgetId: Int?,
 ): WidgetState {
-    val title = buildHeaderTitle(repos, filter)
+    val title = buildHeaderTitle(repos, filter, labelFilterMode)
+
+    // GitHub REST `/issues?labels=a,b` は AND セマンティクス。OR モードや
+    // LABEL_NONE (ラベルなし) を含むケースは API 側でフィルタできないので、
+    // labels パラメータを外して広めに取得しクライアント側で絞り込む。
+    val needsClientLabelFilter = filter.labels.isNotEmpty() && (
+        labelFilterMode == WidgetConfig.LabelFilterMode.OR ||
+            filter.labels.any { it == WidgetConfig.LABEL_NONE }
+        )
+    val effectiveFilter = if (needsClientLabelFilter) {
+        filter.copy(labels = emptyList(), perPage = 100)
+    } else {
+        filter
+    }
+
     val results: List<Pair<RepoRef, Result<List<Issue>>>> = coroutineScope {
         repos.map { repo ->
-            async { repo to container.issueRepository.fetchIssues(repo, filter) }
+            async { repo to container.issueRepository.fetchIssues(repo, effectiveFilter) }
         }.awaitAll()
     }
     val successes = results.filter { it.second.isSuccess }
@@ -158,8 +277,13 @@ private suspend fun loadRepositoryMode(
             )
         }
     } else {
-        val merged = successes
-            .flatMap { it.second.getOrThrow() }
+        val flat = successes.flatMap { it.second.getOrThrow() }
+        val labelFiltered = if (needsClientLabelFilter) {
+            flat.filterByLabelConfig(filter.labels, labelFilterMode)
+        } else {
+            flat
+        }
+        val merged = labelFiltered
             .sortedByFilter(filter.sort, filter.direction)
             .take(filter.perPage)
         appWidgetId?.let { container.issueCacheStore.save(it, merged) }
@@ -224,7 +348,7 @@ private suspend fun cacheOrError(
 private fun List<Issue>.applyAdditionalFilters(config: WidgetConfig): List<Issue> {
     val byRepo = if (config.repoRefs.isEmpty()) this
     else filter { it.repoRef in config.repoRefs }
-    val byLabel = byRepo.filterByLabelConfig(config.labels)
+    val byLabel = byRepo.filterByLabelConfig(config.labels, config.labelFilterMode)
     return when (config.stateFilter) {
         IssueFilter.StateFilter.ALL -> byLabel
         IssueFilter.StateFilter.OPEN -> byLabel.filter { it.state == IssueState.OPEN }
@@ -233,33 +357,53 @@ private fun List<Issue>.applyAdditionalFilters(config: WidgetConfig): List<Issue
 }
 
 /**
- * ラベル設定によるフィルタ。
+ * ラベル設定によるフィルタ。`mode` は通常ラベル群の結合方法。
  * - 設定が空 → 全件通す
  * - [WidgetConfig.LABEL_NONE] のみ → ラベル空 Issue のみ
- * - 通常ラベルあり → 通常ラベルすべてを満たす Issue。さらに LABEL_NONE が含まれていればラベル空 Issue も OR で許可
+ * - 通常ラベルあり (mode=AND) → 通常ラベルすべてを満たす Issue。LABEL_NONE があればラベル空 Issue も OR で許可
+ * - 通常ラベルあり (mode=OR)  → 通常ラベルのいずれかを満たす Issue。LABEL_NONE があればラベル空 Issue も OR で許可
  */
-private fun List<Issue>.filterByLabelConfig(configLabels: List<String>): List<Issue> {
+private fun List<Issue>.filterByLabelConfig(
+    configLabels: List<String>,
+    mode: WidgetConfig.LabelFilterMode,
+): List<Issue> {
     if (configLabels.isEmpty()) return this
     val includeUnlabeled = configLabels.any { it == WidgetConfig.LABEL_NONE }
     val normalLabels = configLabels.filter { it != WidgetConfig.LABEL_NONE }.map { it.lowercase() }
     return filter { issue ->
         val names = issue.labels.map { it.name.lowercase() }.toSet()
-        val matchesNormal = normalLabels.isNotEmpty() && normalLabels.all { it in names }
+        val matchesNormal = normalLabels.isNotEmpty() && when (mode) {
+            WidgetConfig.LabelFilterMode.AND -> normalLabels.all { it in names }
+            WidgetConfig.LabelFilterMode.OR -> normalLabels.any { it in names }
+        }
         val matchesUnlabeled = includeUnlabeled && issue.labels.isEmpty()
         matchesNormal || matchesUnlabeled
     }
+}
+
+/** 表示用ラベル結合: AND は ",", OR は " | "。 */
+private fun List<String>.joinLabelsForTitle(mode: WidgetConfig.LabelFilterMode): String {
+    val sep = when (mode) {
+        WidgetConfig.LabelFilterMode.AND -> ","
+        WidgetConfig.LabelFilterMode.OR -> " | "
+    }
+    return joinToString(sep)
 }
 
 private fun buildProjectHeaderTitle(config: WidgetConfig, filter: IssueFilter): String {
     val parts = mutableListOf<String>()
     parts += config.projectTitle.orEmpty()
     if (!config.projectColumnName.isNullOrBlank()) parts += config.projectColumnName
-    if (filter.labels.isNotEmpty()) parts += filter.labels.joinToString(",")
+    if (filter.labels.isNotEmpty()) parts += filter.labels.joinLabelsForTitle(config.labelFilterMode)
     if (filter.assignee != null) parts += "@${filter.assignee}"
     return parts.joinToString(" · ")
 }
 
-private fun buildHeaderTitle(repos: List<RepoRef>, filter: IssueFilter): String {
+private fun buildHeaderTitle(
+    repos: List<RepoRef>,
+    filter: IssueFilter,
+    labelFilterMode: WidgetConfig.LabelFilterMode,
+): String {
     val repoLabel = when (repos.size) {
         0 -> "GitHub Issue"
         1 -> repos.first().fullName
@@ -267,7 +411,7 @@ private fun buildHeaderTitle(repos: List<RepoRef>, filter: IssueFilter): String 
     }
     val parts = mutableListOf(repoLabel)
     if (filter.stateFilter != IssueFilter.StateFilter.OPEN) parts += filter.stateFilter.apiValue
-    if (filter.labels.isNotEmpty()) parts += filter.labels.joinToString(",")
+    if (filter.labels.isNotEmpty()) parts += filter.labels.joinLabelsForTitle(labelFilterMode)
     if (filter.assignee != null) parts += "@${filter.assignee}"
     return parts.joinToString(" · ")
 }
@@ -308,6 +452,7 @@ private fun WidgetContent(
     displayOptions: WidgetDisplayOptions,
     addIssueAction: Action?,
     configureAction: Action?,
+    refreshing: Boolean,
 ) {
     Column(
         modifier = GlanceModifier
@@ -321,10 +466,11 @@ private fun WidgetContent(
                 is WidgetState.Error -> state.repoName
                 else -> "GitHub Issue"
             },
+            refreshing = refreshing,
             addIssueAction = addIssueAction,
             configureAction = configureAction,
         )
-        if (state is WidgetState.Loaded && state.staleSinceMillis != null) {
+        if (!refreshing && state is WidgetState.Loaded && state.staleSinceMillis != null) {
             StaleNotice(state.staleSinceMillis)
         }
         Spacer(GlanceModifier.height(4.dp))
@@ -333,7 +479,9 @@ private fun WidgetContent(
             WidgetState.NoRepo -> CenterMessage("リポジトリを追加してください")
             is WidgetState.Error -> CenterMessage(state.message)
             is WidgetState.Loaded -> if (state.issues.isEmpty()) {
-                CenterMessage("Issueがありません")
+                // 初回 refresh など、まだキャッシュが無い状態でボタンを押したケースを考慮し
+                // refreshing 中の空表示は「更新中…」に置き換える。
+                CenterMessage(if (refreshing) "更新中…" else "Issueがありません")
             } else {
                 val showRepoInRow = state.issues.map { it.repoRef }.distinct().size > 1
                 IssueListContent(state.issues, displayOptions, showRepoInRow)
@@ -364,7 +512,12 @@ private fun StaleNotice(savedAtMillis: Long) {
 }
 
 @androidx.compose.runtime.Composable
-private fun Header(title: String, addIssueAction: Action?, configureAction: Action?) {
+private fun Header(
+    title: String,
+    refreshing: Boolean,
+    addIssueAction: Action?,
+    configureAction: Action?,
+) {
     val iconTint = ColorProvider(day = ComposeColor(0xFF555555), night = ComposeColor(0xFFCCCCCC))
     Row(
         modifier = GlanceModifier.fillMaxWidth(),
@@ -380,6 +533,19 @@ private fun Header(title: String, addIssueAction: Action?, configureAction: Acti
             maxLines = 1,
             modifier = GlanceModifier.defaultWeight(),
         )
+        if (refreshing) {
+            Spacer(GlanceModifier.width(4.dp))
+            Text(
+                text = "更新中…",
+                style = TextStyle(
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = ColorProvider(day = ComposeColor(0xFF1976D2), night = ComposeColor(0xFF64B5F6)),
+                ),
+                maxLines = 1,
+            )
+            Spacer(GlanceModifier.width(6.dp))
+        }
         Image(
             provider = ImageProvider(android.R.drawable.ic_popup_sync),
             contentDescription = "更新",
@@ -607,12 +773,32 @@ private fun daysUntilDue(iso: String): Int? = runCatching {
     ).toInt()
 }.getOrNull()
 
+/**
+ * 2 段階再描画でユーザーへの体感応答を改善する更新ハンドラ。
+ *
+ * 1. [WIDGET_REFRESHING_KEY] = true をセット → `update()` 呼び出しで
+ *    「更新中…」付きのキャッシュ表示が即座に出る（ネットワーク fetch なし、所要 < 数十ms）。
+ * 2. フラグをクリアして再度 `update()` → 通常経路で fetch して最終結果を反映。
+ *
+ * これにより、タップ直後に「ボタンが反応した」事が視覚的に伝わるようになる。
+ */
 class RefreshAction : ActionCallback {
     override suspend fun onAction(
         context: Context,
         glanceId: GlanceId,
         parameters: ActionParameters,
     ) {
-        IssueGlanceWidget().update(context, glanceId)
+        try {
+            updateAppWidgetState(context, glanceId) { prefs ->
+                prefs[WIDGET_REFRESHING_KEY] = true
+            }
+            IssueGlanceWidget().update(context, glanceId)
+        } finally {
+            // フラグは必ずクリアする（描画パスで例外が出ても、次回タップで詰まらないように）。
+            updateAppWidgetState(context, glanceId) { prefs ->
+                prefs[WIDGET_REFRESHING_KEY] = false
+            }
+            IssueGlanceWidget().update(context, glanceId)
+        }
     }
 }

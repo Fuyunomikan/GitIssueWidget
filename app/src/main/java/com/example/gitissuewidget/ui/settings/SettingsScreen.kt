@@ -1,5 +1,6 @@
 package com.example.gitissuewidget.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -13,6 +14,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.DropdownMenuItem
@@ -472,6 +475,9 @@ private fun TokenSection(
             color = if (tokenSaved) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
             style = MaterialTheme.typography.bodySmall,
         )
+
+        RequiredScopesInfo()
+
         OutlinedTextField(
             value = input,
             onValueChange = { input = it },
@@ -498,6 +504,96 @@ private fun TokenSection(
             OutlinedButton(onClick = onClear, enabled = tokenSaved) {
                 Text("削除")
             }
+        }
+    }
+}
+
+/**
+ * PAT に必要なスコープを案内する説明カード。
+ * デフォルトは折りたたみ表示 (「詳細はこちら」) で、ヘッダタップで展開する。
+ * Classic PAT / Fine-grained PAT の両方の表記を併記する。
+ */
+@Composable
+private fun RequiredScopesInfo() {
+    var expanded by remember { mutableStateOf(false) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "必要なパーミッション",
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = if (expanded) "閉じる" else "詳細はこちら",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                    contentDescription = if (expanded) "閉じる" else "詳細はこちら",
+                )
+            }
+
+            if (expanded) {
+                Text(
+                    text = "PAT 発行時に以下のスコープを付与してください。" +
+                        "不足している場合、Issue 取得や Project 操作が失敗します。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+
+                Spacer(Modifier.height(2.dp))
+                Text("Classic PAT (tokens/classic)", style = MaterialTheme.typography.labelLarge)
+                ScopeBullet(
+                    name = "repo",
+                    description = "Issue 一覧取得・private リポジトリのアクセスに必須 " +
+                        "(public のみで良ければ public_repo でも可)",
+                )
+                ScopeBullet(
+                    name = "project",
+                    description = "Projects v2 の列挙 / Status 更新 / Issue 追加に必須 " +
+                        "(スワイプ操作・Project モードのウィジェットを使う場合)",
+                )
+
+                Spacer(Modifier.height(2.dp))
+                Text("Fine-grained PAT", style = MaterialTheme.typography.labelLarge)
+                ScopeBullet(
+                    name = "Repository: Issues",
+                    description = "Read and write (Issue 読み書き)",
+                )
+                ScopeBullet(
+                    name = "Repository: Metadata",
+                    description = "Read-only (リポジトリ情報の読み取り、必須)",
+                )
+                ScopeBullet(
+                    name = "Organization / User: Projects",
+                    description = "Read and write (Projects v2 操作用)",
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ScopeBullet(name: String, description: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text("・", style = MaterialTheme.typography.bodySmall)
+        Column {
+            Text(name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            Text(description, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

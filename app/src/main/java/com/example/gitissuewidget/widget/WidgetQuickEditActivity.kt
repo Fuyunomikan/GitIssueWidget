@@ -77,8 +77,8 @@ class WidgetQuickEditActivity : ComponentActivity() {
                 QuickEditDialog(
                     appWidgetId = appWidgetId,
                     onCancel = ::finish,
-                    onSave = { repos, labels, projectTitle, projectColumn ->
-                        saveAndFinish(repos, labels, projectTitle, projectColumn)
+                    onSave = { repos, labels, labelFilterMode, projectTitle, projectColumn ->
+                        saveAndFinish(repos, labels, labelFilterMode, projectTitle, projectColumn)
                     },
                 )
             }
@@ -88,6 +88,7 @@ class WidgetQuickEditActivity : ComponentActivity() {
     private fun saveAndFinish(
         repos: List<RepoRef>,
         labels: List<String>,
+        labelFilterMode: WidgetConfig.LabelFilterMode,
         projectTitle: String,
         projectColumn: String,
     ) {
@@ -99,6 +100,7 @@ class WidgetQuickEditActivity : ComponentActivity() {
                 repoRefs = repos,
                 stateFilter = existing?.stateFilter ?: IssueFilter.StateFilter.OPEN,
                 labels = labels,
+                labelFilterMode = labelFilterMode,
                 assigneeLogin = existing?.assigneeLogin,
                 projectTitle = projectTitle.takeIf { it.isNotBlank() },
                 projectColumnName = projectColumn.takeIf { it.isNotBlank() },
@@ -120,7 +122,7 @@ class WidgetQuickEditActivity : ComponentActivity() {
 private fun QuickEditDialog(
     appWidgetId: Int,
     onCancel: () -> Unit,
-    onSave: (List<RepoRef>, List<String>, String, String) -> Unit,
+    onSave: (List<RepoRef>, List<String>, WidgetConfig.LabelFilterMode, String, String) -> Unit,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as IssueWidgetApp
@@ -129,6 +131,7 @@ private fun QuickEditDialog(
     var selectedRepos by remember { mutableStateOf<List<RepoRef>>(emptyList()) }
     var availableLabels by remember { mutableStateOf<List<Label>>(emptyList()) }
     var selectedLabels by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var labelFilterMode by remember { mutableStateOf(WidgetConfig.LabelFilterMode.AND) }
     var labelsLoading by remember { mutableStateOf(false) }
     var initialized by remember { mutableStateOf(false) }
     var projectTitle by remember { mutableStateOf("") }
@@ -141,6 +144,7 @@ private fun QuickEditDialog(
         watchedRepos = merged
         selectedRepos = existing?.repoRefs ?: merged
         selectedLabels = existing?.labels?.toSet() ?: emptySet()
+        labelFilterMode = existing?.labelFilterMode ?: WidgetConfig.LabelFilterMode.AND
         projectTitle = existing?.projectTitle.orEmpty()
         projectColumn = existing?.projectColumnName.orEmpty()
         initialized = true
@@ -216,6 +220,8 @@ private fun QuickEditDialog(
                                 selectedLabels = if (name in selectedLabels) selectedLabels - name
                                 else selectedLabels + name
                             },
+                            filterMode = labelFilterMode,
+                            onFilterModeChange = { labelFilterMode = it },
                         )
                     }
                 }
@@ -232,6 +238,7 @@ private fun QuickEditDialog(
                             onSave(
                                 selectedRepos,
                                 selectedLabels.toList(),
+                                labelFilterMode,
                                 projectTitle.trim(),
                                 projectColumn.trim(),
                             )
@@ -332,6 +339,8 @@ private fun LabelsDropdownSection(
     selected: Set<String>,
     loading: Boolean,
     onToggle: (String) -> Unit,
+    filterMode: WidgetConfig.LabelFilterMode,
+    onFilterModeChange: (WidgetConfig.LabelFilterMode) -> Unit,
 ) {
     Column {
         Text("ラベル", style = MaterialTheme.typography.labelLarge)
@@ -361,6 +370,21 @@ private fun LabelsDropdownSection(
                         )
                     }
                 }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "複数ラベルの結合",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            WidgetConfig.LabelFilterMode.values().forEach { mode ->
+                FilterChip(
+                    selected = mode == filterMode,
+                    onClick = { onFilterModeChange(mode) },
+                    label = { Text(mode.displayName) },
+                )
             }
         }
     }
