@@ -58,6 +58,21 @@ class PreferenceStore(context: Context) {
             ?: SwipeAction.NONE
     }
 
+    /** スワイプアクション (PENDING/COMPLETE) で Issue を移動させる Project のタイトル。viewer 所有。 */
+    val swipeProjectTitle: Flow<String?> = dataStore.data.map { prefs ->
+        prefs[KEY_SWIPE_PROJECT_TITLE]?.takeIf { it.isNotBlank() }
+    }
+
+    /** PENDING スワイプ時に移動するカラム名（Project の Status SingleSelect オプション名）。 */
+    val pendingColumnName: Flow<String> = dataStore.data.map { prefs ->
+        prefs[KEY_PENDING_COLUMN_NAME]?.takeIf { it.isNotBlank() } ?: DEFAULT_PENDING_COLUMN
+    }
+
+    /** COMPLETE スワイプ時に移動するカラム名。 */
+    val doneColumnName: Flow<String> = dataStore.data.map { prefs ->
+        prefs[KEY_DONE_COLUMN_NAME]?.takeIf { it.isNotBlank() } ?: DEFAULT_DONE_COLUMN
+    }
+
     suspend fun setSortOption(value: SortOption) {
         dataStore.edit { it[KEY_SORT_OPTION] = value.name }
     }
@@ -106,6 +121,21 @@ class PreferenceStore(context: Context) {
         dataStore.edit { it[KEY_RIGHT_SWIPE] = value.name }
     }
 
+    suspend fun setSwipeProjectTitle(value: String?) {
+        dataStore.edit { prefs ->
+            if (value.isNullOrBlank()) prefs.remove(KEY_SWIPE_PROJECT_TITLE)
+            else prefs[KEY_SWIPE_PROJECT_TITLE] = value.trim()
+        }
+    }
+
+    suspend fun setPendingColumnName(value: String) {
+        dataStore.edit { it[KEY_PENDING_COLUMN_NAME] = value.trim().ifBlank { DEFAULT_PENDING_COLUMN } }
+    }
+
+    suspend fun setDoneColumnName(value: String) {
+        dataStore.edit { it[KEY_DONE_COLUMN_NAME] = value.trim().ifBlank { DEFAULT_DONE_COLUMN } }
+    }
+
     companion object {
         private val KEY_SORT_OPTION = stringPreferencesKey("sort_option")
         private val KEY_SORT_DIRECTION = stringPreferencesKey("sort_direction")
@@ -116,8 +146,13 @@ class PreferenceStore(context: Context) {
         private val KEY_SHOW_LABELS = booleanPreferencesKey("show_labels")
         private val KEY_LEFT_SWIPE = stringPreferencesKey("left_swipe_action")
         private val KEY_RIGHT_SWIPE = stringPreferencesKey("right_swipe_action")
+        private val KEY_SWIPE_PROJECT_TITLE = stringPreferencesKey("swipe_project_title")
+        private val KEY_PENDING_COLUMN_NAME = stringPreferencesKey("pending_column_name")
+        private val KEY_DONE_COLUMN_NAME = stringPreferencesKey("done_column_name")
 
         const val DEFAULT_PER_PAGE = 20
         const val DEFAULT_REFRESH_INTERVAL = 30
+        const val DEFAULT_PENDING_COLUMN = "Pending"
+        const val DEFAULT_DONE_COLUMN = "Done"
     }
 }

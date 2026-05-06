@@ -17,7 +17,6 @@ import com.example.gitissuewidget.domain.User
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -30,6 +29,8 @@ data class MainUiState(
     val errorMessage: String? = null,
     val leftSwipeAction: SwipeAction = SwipeAction.NONE,
     val rightSwipeAction: SwipeAction = SwipeAction.NONE,
+    /** Project 未設定時にスワイプされた際に表示する警告メッセージ。null = 非表示。 */
+    val swipeProjectMissing: String? = null,
 )
 
 class MainViewModel(
@@ -109,23 +110,56 @@ class MainViewModel(
         _uiState.value = _uiState.value.copy(errorMessage = null)
     }
 
+    fun consumeSwipeProjectMissing() {
+        _uiState.value = _uiState.value.copy(swipeProjectMissing = null)
+    }
+
+    /**
+     * スワイプアクションを実行する。
+     *
+     * 流れ:
+     * 1. 設定画面の `swipeProjectTitle` を取得。空なら警告ダイアログ用 state をセットして中断
+     * 2. アクションに応じた対象カラム名（pendingColumnName / doneColumnName）を取得
+     * 3. ProjectMetaCache 経由で Project を解決（見つからなければ errorMessage で通知）
+     * 4. `IssueRepository.moveIssueToColumn` で Status を更新
+     * 5. 完了後 [refresh] で UI を最新化（失敗時も refresh して整合性を保つ）
+     */
     fun applySwipeAction(issue: Issue, isLeftSwipe: Boolean) {
         val action = if (isLeftSwipe) _uiState.value.leftSwipeAction else _uiState.value.rightSwipeAction
         if (action == SwipeAction.NONE) return
         viewModelScope.launch {
-            val result = when (action) {
-                SwipeAction.DELETE -> issueRepository.closeIssue(issue.repoRef, issue.number, "not_planned")
-                SwipeAction.COMPLETE -> issueRepository.closeIssue(issue.repoRef, issue.number, "completed")
-                SwipeAction.PENDING -> issueRepository.moveToPending(
-                    repo = issue.repoRef,
-                    number = issue.number,
-                    currentState = issue.state,
-                    currentLabels = issue.labels.map { it.name },
+            val projectTitle = preferenceStore.swipeProjectTitle.first()
+            if (projectTitle.isNullOrBlank()) {
+                _uiState.value = _uiState.value.copy(
+                    swipeProjectMissing = "スワイプ用 Project が未設定です。設定画面で Project タイトルを指定してください。",
                 )
+                refresh()
+                return@launch
+            }
+
+            val targetColumnName = when (action) {
+                SwipeAction.PENDING -> preferenceStore.pendingColumnName.first()
+                SwipeAction.COMPLETE -> preferenceStore.doneColumnName.first()
                 SwipeAction.NONE -> return@launch
             }
-            result.onFailure { e ->
-                _uiState.value = _uiState.value.copy(errorMessage = e.message ?: "操作に失敗しました")
+
+            val metaResult = issueRepository.resolveProjectByTitle(projectTitle)
+            val projectMeta = metaResult.getOrElse { e ->
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = e.message ?: "Project の取得に失敗しました",
+                )
+                refresh()
+                return@launch
+            }
+
+            issueRepository.moveIssueToColumn(
+                issueNodeId = issue.nodeId,
+                projectMeta = projectMeta,
+                targetColumnName = targetColumnName,
+            ).onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = e.message ?: "カラム移動に失敗しました",
+                )
             }
             refresh()
         }

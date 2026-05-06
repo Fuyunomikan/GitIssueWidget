@@ -29,11 +29,18 @@ object NetworkModule {
     }
 
     fun createGitHubApi(client: OkHttpClient): GitHubApi {
-        val retrofit = Retrofit.Builder()
+        return buildRetrofit(client).create(GitHubApi::class.java)
+    }
+
+    fun createGitHubGraphQlApi(client: OkHttpClient): GitHubGraphQlApi {
+        return buildRetrofit(client).create(GitHubGraphQlApi::class.java)
+    }
+
+    private fun buildRetrofit(client: OkHttpClient): Retrofit {
+        return Retrofit.Builder()
             .baseUrl(GitHubApi.BASE_URL)
             .client(client)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
-        return retrofit.create(GitHubApi::class.java)
     }
 }

@@ -1,14 +1,11 @@
 package com.example.gitissuewidget.data.remote
 
-import com.example.gitissuewidget.data.remote.dto.AddLabelsRequest
 import com.example.gitissuewidget.data.remote.dto.CreateIssueRequest
 import com.example.gitissuewidget.data.remote.dto.IssueDto
 import com.example.gitissuewidget.data.remote.dto.LabelDto
-import com.example.gitissuewidget.data.remote.dto.UpdateIssueRequest
 import com.example.gitissuewidget.data.remote.dto.UserDto
 import retrofit2.http.Body
 import retrofit2.http.GET
-import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -42,22 +39,6 @@ interface GitHubApi {
         @Path("owner") owner: String,
         @Path("repo") repo: String,
         @Query("per_page") perPage: Int = 100,
-    ): List<LabelDto>
-
-    @PATCH("repos/{owner}/{repo}/issues/{number}")
-    suspend fun updateIssue(
-        @Path("owner") owner: String,
-        @Path("repo") repo: String,
-        @Path("number") number: Int,
-        @Body request: UpdateIssueRequest,
-    ): IssueDto
-
-    @POST("repos/{owner}/{repo}/issues/{number}/labels")
-    suspend fun addLabels(
-        @Path("owner") owner: String,
-        @Path("repo") repo: String,
-        @Path("number") number: Int,
-        @Body request: AddLabelsRequest,
     ): List<LabelDto>
 
     companion object {

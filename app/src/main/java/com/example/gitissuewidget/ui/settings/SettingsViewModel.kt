@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.gitissuewidget.IssueWidgetApp
 import com.example.gitissuewidget.data.local.PreferenceStore
 import com.example.gitissuewidget.data.local.TokenStore
+import com.example.gitissuewidget.data.repo.IssueRepository
 import com.example.gitissuewidget.domain.RepoRef
 import com.example.gitissuewidget.domain.SortDirection
 import com.example.gitissuewidget.domain.SortOption
@@ -30,6 +31,9 @@ data class SettingsUiState(
     val showLabels: Boolean = true,
     val leftSwipeAction: SwipeAction = SwipeAction.NONE,
     val rightSwipeAction: SwipeAction = SwipeAction.NONE,
+    val swipeProjectTitle: String = "",
+    val pendingColumnName: String = PreferenceStore.DEFAULT_PENDING_COLUMN,
+    val doneColumnName: String = PreferenceStore.DEFAULT_DONE_COLUMN,
 )
 
 private data class BasicPrefs(
@@ -50,9 +54,16 @@ private data class SwipePrefs(
     val right: SwipeAction,
 )
 
+private data class ProjectPrefs(
+    val swipeProjectTitle: String,
+    val pendingColumnName: String,
+    val doneColumnName: String,
+)
+
 class SettingsViewModel(
     private val tokenStore: TokenStore,
     private val preferenceStore: PreferenceStore,
+    private val issueRepository: IssueRepository,
 ) : ViewModel() {
 
     private val tokenSaved = MutableStateFlow(tokenStore.hasToken())
@@ -77,7 +88,18 @@ class SettingsViewModel(
         preferenceStore.rightSwipeAction,
     ) { left, right -> SwipePrefs(left, right) }
 
-    val uiState: StateFlow<SettingsUiState> = combine(basicFlow, displayFlow, swipeFlow) { basic, display, swipe ->
+    private val projectFlow = combine(
+        preferenceStore.swipeProjectTitle,
+        preferenceStore.pendingColumnName,
+        preferenceStore.doneColumnName,
+    ) { title, pending, done -> ProjectPrefs(title.orEmpty(), pending, done) }
+
+    val uiState: StateFlow<SettingsUiState> = combine(
+        basicFlow,
+        displayFlow,
+        swipeFlow,
+        projectFlow,
+    ) { basic, display, swipe, project ->
         SettingsUiState(
             tokenSaved = basic.tokenSaved,
             watchedRepos = basic.watchedRepos,
@@ -88,11 +110,21 @@ class SettingsViewModel(
             showLabels = display.showLabels,
             leftSwipeAction = swipe.left,
             rightSwipeAction = swipe.right,
+            swipeProjectTitle = project.swipeProjectTitle,
+            pendingColumnName = project.pendingColumnName,
+            doneColumnName = project.doneColumnName,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
+
+    /** GraphQL で取得済みの viewer Project タイトル一覧。null = 未取得。 */
+    private val _availableProjectTitles = MutableStateFlow<List<String>?>(null)
+    val availableProjectTitles: StateFlow<List<String>?> = _availableProjectTitles.asStateFlow()
+
+    private val _projectsLoading = MutableStateFlow(false)
+    val projectsLoading: StateFlow<Boolean> = _projectsLoading.asStateFlow()
 
     fun saveToken(raw: String) {
         val trimmed = raw.trim()
@@ -158,6 +190,42 @@ class SettingsViewModel(
         viewModelScope.launch { preferenceStore.setRightSwipeAction(value) }
     }
 
+    fun setSwipeProjectTitle(value: String) {
+        viewModelScope.launch { preferenceStore.setSwipeProjectTitle(value) }
+    }
+
+    fun setPendingColumnName(value: String) {
+        viewModelScope.launch { preferenceStore.setPendingColumnName(value) }
+    }
+
+    fun setDoneColumnName(value: String) {
+        viewModelScope.launch { preferenceStore.setDoneColumnName(value) }
+    }
+
+    /**
+     * viewer の Projects v2 一覧を GraphQL で取得し、タイトル一覧をUIに反映する。
+     * PAT に project スコープが無い場合・Project が無い場合はエラーメッセージを Snackbar に出す。
+     */
+    fun refreshProjects() {
+        if (_projectsLoading.value) return
+        viewModelScope.launch {
+            _projectsLoading.value = true
+            issueRepository.listAvailableProjects(forceRefresh = true)
+                .onSuccess { metas ->
+                    _availableProjectTitles.value = metas.map { it.project.title }
+                    _message.value = if (metas.isEmpty()) {
+                        "Project が見つかりませんでした (PAT に project スコープがあるか確認してください)"
+                    } else {
+                        "Project ${metas.size} 件を取得しました"
+                    }
+                }
+                .onFailure { e ->
+                    _message.value = "Project 取得エラー: ${e.message ?: "不明"}"
+                }
+            _projectsLoading.value = false
+        }
+    }
+
     fun consumeMessage() {
         _message.value = null
     }
@@ -169,6 +237,7 @@ class SettingsViewModel(
                 SettingsViewModel(
                     tokenStore = app.container.tokenStore,
                     preferenceStore = app.container.preferenceStore,
+                    issueRepository = app.container.issueRepository,
                 )
             }
         }

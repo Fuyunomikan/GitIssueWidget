@@ -1,21 +1,27 @@
 package com.example.gitissuewidget.data.repo
 
+import com.example.gitissuewidget.data.local.ProjectMetaCache
 import com.example.gitissuewidget.data.remote.GitHubApi
-import com.example.gitissuewidget.data.remote.dto.AddLabelsRequest
+import com.example.gitissuewidget.data.remote.GitHubGraphQlClient
+import com.example.gitissuewidget.data.remote.GraphQlException
 import com.example.gitissuewidget.data.remote.dto.CreateIssueRequest
 import com.example.gitissuewidget.data.remote.dto.IssueDto
 import com.example.gitissuewidget.data.remote.dto.LabelDto
-import com.example.gitissuewidget.data.remote.dto.UpdateIssueRequest
 import com.example.gitissuewidget.data.remote.dto.UserDto
 import com.example.gitissuewidget.domain.Issue
 import com.example.gitissuewidget.domain.IssueFilter
 import com.example.gitissuewidget.domain.IssueState
 import com.example.gitissuewidget.domain.Label
+import com.example.gitissuewidget.domain.ProjectMeta
 import com.example.gitissuewidget.domain.RepoRef
 import com.example.gitissuewidget.domain.User
 import retrofit2.HttpException
 
-class IssueRepository(private val api: GitHubApi) {
+class IssueRepository(
+    private val api: GitHubApi,
+    private val graphQl: GitHubGraphQlClient,
+    private val projectMetaCache: ProjectMetaCache,
+) {
 
     suspend fun fetchCurrentUser(): Result<User> = runCatching {
         api.getCurrentUser().toDomain()
@@ -51,40 +57,66 @@ class IssueRepository(private val api: GitHubApi) {
     }.mapHttpError()
 
     /**
-     * @param stateReason "completed" or "not_planned"
+     * viewer の Project 一覧をキャッシュ込みで取得（設定画面の Project タイトル候補表示用）。
      */
-    suspend fun closeIssue(repo: RepoRef, number: Int, stateReason: String): Result<Issue> = runCatching {
-        val request = UpdateIssueRequest(state = "closed", stateReason = stateReason)
-        api.updateIssue(repo.owner, repo.name, number, request).toDomain(repo)
+    suspend fun listAvailableProjects(forceRefresh: Boolean = false): Result<List<ProjectMeta>> = runCatching {
+        if (forceRefresh) projectMetaCache.refresh() else projectMetaCache.list()
     }.mapHttpError()
 
     /**
-     * 「Pending カラムに移動」セマンティクス。
-     * Issue が closed なら open に戻し、既存ラベルを保ったまま `"Pending"` ラベルを追加する。
-     *
-     * 実装メモ: `PATCH /issues/{n}` の `labels` フィールドを使うと存在しないラベル名を
-     * GitHub が自動作成するため、リポジトリに事前に "Pending" ラベルが無くても動作する。
-     * 一方 `POST /issues/{n}/labels` は存在しないラベルでは 422 エラーになるので使わない。
-     * state 変更とラベル変更を 1 リクエストにまとめて API 呼び出しを 1 回に抑える。
+     * Project タイトルから [ProjectMeta] を解決。見つからなければ [GraphQlException]。
+     * スワイプアクション・ウィジェット表示の両方で使う。
      */
-    suspend fun moveToPending(
-        repo: RepoRef,
-        number: Int,
-        currentState: IssueState,
-        currentLabels: List<String>,
-    ): Result<Unit> = runCatching {
-        val mergedLabels = (currentLabels + PENDING_LABEL).distinct()
-        val request = UpdateIssueRequest(
-            state = if (currentState == IssueState.CLOSED) "open" else null,
-            labels = mergedLabels,
-        )
-        api.updateIssue(repo.owner, repo.name, number, request)
-        Unit
+    suspend fun resolveProjectByTitle(title: String): Result<ProjectMeta> = runCatching {
+        projectMetaCache.findByTitle(title)
+            ?: throw GraphQlException(
+                "Project \"$title\" が見つかりません。タイトルが正しいか、PAT に project スコープがあるか確認してください。",
+            )
     }.mapHttpError()
 
-    companion object {
-        const val PENDING_LABEL = "Pending"
-    }
+    /**
+     * 指定 Project の指定カラムの Issue を取得。`columnName` が null の場合は全カラム。
+     * `perPage` は GitHub の `items(first:)` 上限 100 と、カラムフィルタによる削減を見込んで
+     * `perPage*3 (≤100)` を fetch してからクライアント側で絞り込む。
+     */
+    suspend fun fetchProjectIssues(
+        projectMeta: ProjectMeta,
+        columnName: String?,
+        perPage: Int,
+    ): Result<List<Issue>> = runCatching {
+        val fetchSize = (perPage * 3).coerceIn(perPage, 100)
+        val items = graphQl.listProjectItems(projectMeta.project.nodeId, first = fetchSize)
+        val filtered = if (columnName.isNullOrBlank()) items
+        else items.filter { it.statusOptionName.equals(columnName, ignoreCase = true) }
+        filtered.map { it.issue }.take(perPage)
+    }.mapHttpError()
+
+    /**
+     * 指定 Issue を Project の指定カラムに移動。Issue が Project 未追加なら自動追加してから Status を更新する。
+     *
+     * @throws GraphQlException 対象カラムが Project に存在しない場合 / Issue.nodeId が空の場合
+     */
+    suspend fun moveIssueToColumn(
+        issueNodeId: String,
+        projectMeta: ProjectMeta,
+        targetColumnName: String,
+    ): Result<Unit> = runCatching {
+        if (issueNodeId.isBlank()) {
+            throw GraphQlException("Issue の nodeId が空です。一覧を更新してから再試行してください。")
+        }
+        val column = projectMeta.findColumn(targetColumnName)
+            ?: throw GraphQlException(
+                "カラム \"$targetColumnName\" が Project \"${projectMeta.project.title}\" に存在しません。",
+            )
+        val existingItemId = graphQl.findProjectItemId(projectMeta.project.nodeId, issueNodeId)
+        val itemId = existingItemId ?: graphQl.addItemToProject(projectMeta.project.nodeId, issueNodeId)
+        graphQl.updateItemStatus(
+            projectNodeId = projectMeta.project.nodeId,
+            itemId = itemId,
+            statusFieldId = projectMeta.statusFieldId,
+            optionId = column.optionId,
+        )
+    }.mapHttpError()
 
     private fun <T> Result<T>.mapHttpError(): Result<T> = recoverCatching { e ->
         when (e) {
@@ -120,4 +152,5 @@ private fun IssueDto.toDomain(repo: RepoRef) = Issue(
     createdAt = createdAt,
     commentsCount = comments,
     repoRef = repo,
+    nodeId = nodeId,
 )

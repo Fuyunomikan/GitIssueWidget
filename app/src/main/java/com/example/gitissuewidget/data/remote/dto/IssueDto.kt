@@ -15,4 +15,5 @@ data class IssueDto(
     @SerialName("created_at") val createdAt: String = "",
     val comments: Int = 0,
     @SerialName("pull_request") val pullRequest: JsonElement? = null,
+    @SerialName("node_id") val nodeId: String = "",
 )

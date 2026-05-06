@@ -77,13 +77,20 @@ class WidgetQuickEditActivity : ComponentActivity() {
                 QuickEditDialog(
                     appWidgetId = appWidgetId,
                     onCancel = ::finish,
-                    onSave = { repos, labels -> saveAndFinish(repos, labels) },
+                    onSave = { repos, labels, projectTitle, projectColumn ->
+                        saveAndFinish(repos, labels, projectTitle, projectColumn)
+                    },
                 )
             }
         }
     }
 
-    private fun saveAndFinish(repos: List<RepoRef>, labels: List<String>) {
+    private fun saveAndFinish(
+        repos: List<RepoRef>,
+        labels: List<String>,
+        projectTitle: String,
+        projectColumn: String,
+    ) {
         val app = applicationContext as IssueWidgetApp
         lifecycleScope.launch {
             val existing = app.container.widgetConfigStore.getConfig(appWidgetId)
@@ -93,6 +100,8 @@ class WidgetQuickEditActivity : ComponentActivity() {
                 stateFilter = existing?.stateFilter ?: IssueFilter.StateFilter.OPEN,
                 labels = labels,
                 assigneeLogin = existing?.assigneeLogin,
+                projectTitle = projectTitle.takeIf { it.isNotBlank() },
+                projectColumnName = projectColumn.takeIf { it.isNotBlank() },
             )
             app.container.widgetConfigStore.saveConfig(merged)
 
@@ -111,7 +120,7 @@ class WidgetQuickEditActivity : ComponentActivity() {
 private fun QuickEditDialog(
     appWidgetId: Int,
     onCancel: () -> Unit,
-    onSave: (List<RepoRef>, List<String>) -> Unit,
+    onSave: (List<RepoRef>, List<String>, String, String) -> Unit,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as IssueWidgetApp
@@ -122,6 +131,8 @@ private fun QuickEditDialog(
     var selectedLabels by remember { mutableStateOf<Set<String>>(emptySet()) }
     var labelsLoading by remember { mutableStateOf(false) }
     var initialized by remember { mutableStateOf(false) }
+    var projectTitle by remember { mutableStateOf("") }
+    var projectColumn by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         val repos = app.container.preferenceStore.watchedRepos.first()
@@ -130,6 +141,8 @@ private fun QuickEditDialog(
         watchedRepos = merged
         selectedRepos = existing?.repoRefs ?: merged
         selectedLabels = existing?.labels?.toSet() ?: emptySet()
+        projectTitle = existing?.projectTitle.orEmpty()
+        projectColumn = existing?.projectColumnName.orEmpty()
         initialized = true
     }
 
@@ -181,6 +194,12 @@ private fun QuickEditDialog(
                             .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
+                        ProjectInputs(
+                            projectTitle = projectTitle,
+                            onProjectTitleChange = { projectTitle = it },
+                            projectColumn = projectColumn,
+                            onProjectColumnChange = { projectColumn = it },
+                        )
                         MultiSelectRepoDropdown(
                             repos = watchedRepos,
                             selected = selectedRepos,
@@ -209,8 +228,16 @@ private fun QuickEditDialog(
                 ) {
                     TextButton(onClick = onCancel) { Text("キャンセル") }
                     Button(
-                        onClick = { onSave(selectedRepos, selectedLabels.toList()) },
-                        enabled = initialized && selectedRepos.isNotEmpty(),
+                        onClick = {
+                            onSave(
+                                selectedRepos,
+                                selectedLabels.toList(),
+                                projectTitle.trim(),
+                                projectColumn.trim(),
+                            )
+                        },
+                        // Project モード時は repos が空でも保存可能
+                        enabled = initialized && (selectedRepos.isNotEmpty() || projectTitle.isNotBlank()),
                     ) {
                         Text("保存")
                     }
@@ -270,6 +297,32 @@ private fun formatSelectedRepos(selected: List<RepoRef>): String = when (selecte
     0 -> ""
     1 -> selected.first().fullName
     else -> "${selected.first().fullName} +${selected.size - 1}"
+}
+
+@Composable
+private fun ProjectInputs(
+    projectTitle: String,
+    onProjectTitleChange: (String) -> Unit,
+    projectColumn: String,
+    onProjectColumnChange: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Project (任意)", style = MaterialTheme.typography.labelLarge)
+        OutlinedTextField(
+            value = projectTitle,
+            onValueChange = onProjectTitleChange,
+            label = { Text("Project タイトル") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = projectColumn,
+            onValueChange = onProjectColumnChange,
+            label = { Text("カラム名 (空=全カラム)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)

@@ -96,6 +96,8 @@ class WidgetConfigureActivity : ComponentActivity() {
                 stateFilter = draft.stateFilter,
                 labels = draft.labels,
                 assigneeLogin = resolvedAssignee,
+                projectTitle = draft.projectTitle.takeIf { it.isNotBlank() },
+                projectColumnName = draft.projectColumnName.takeIf { it.isNotBlank() },
             )
             app.container.widgetConfigStore.saveConfig(config)
 
@@ -117,6 +119,8 @@ private data class ConfigDraft(
     val stateFilter: IssueFilter.StateFilter,
     val labels: List<String>,
     val assigneeMe: Boolean,
+    val projectTitle: String,
+    val projectColumnName: String,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -137,6 +141,8 @@ private fun ConfigureScreen(
     var labelInput by remember { mutableStateOf("") }
     var assigneeMe by remember { mutableStateOf(false) }
     var hadExistingConfig by remember { mutableStateOf(false) }
+    var projectTitle by remember { mutableStateOf("") }
+    var projectColumn by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         val repos = app.container.preferenceStore.watchedRepos.first()
@@ -146,6 +152,8 @@ private fun ConfigureScreen(
             stateFilter = existing.stateFilter
             labelInput = existing.labels.joinToString(", ")
             assigneeMe = existing.assigneeLogin != null
+            projectTitle = existing.projectTitle.orEmpty()
+            projectColumn = existing.projectColumnName.orEmpty()
             // Include existing repos even if removed from watched list
             val merged = (repos + existing.repoRefs).distinct()
             watchedRepos = merged
@@ -194,6 +202,13 @@ private fun ConfigureScreen(
                 return@Column
             }
 
+            ProjectFilterSection(
+                projectTitle = projectTitle,
+                onProjectTitleChange = { projectTitle = it },
+                projectColumn = projectColumn,
+                onProjectColumnChange = { projectColumn = it },
+            )
+            HorizontalDivider()
             MultiSelectRepoDropdown(
                 repos = watchedRepos,
                 selected = selectedRepos,
@@ -229,14 +244,56 @@ private fun ConfigureScreen(
                             .split(',', '、')
                             .map { it.trim() }
                             .filter { it.isNotEmpty() }
-                        onSave(ConfigDraft(selectedRepos, stateFilter, labels, assigneeMe))
+                        onSave(
+                            ConfigDraft(
+                                repoRefs = selectedRepos,
+                                stateFilter = stateFilter,
+                                labels = labels,
+                                assigneeMe = assigneeMe,
+                                projectTitle = projectTitle.trim(),
+                                projectColumnName = projectColumn.trim(),
+                            ),
+                        )
                     },
-                    enabled = selectedRepos.isNotEmpty(),
+                    // Project モード時は repos が空でも保存可能（リポジトリは追加絞り込み）
+                    enabled = selectedRepos.isNotEmpty() || projectTitle.isNotBlank(),
                 ) {
                     Text("完了")
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ProjectFilterSection(
+    projectTitle: String,
+    onProjectTitleChange: (String) -> Unit,
+    projectColumn: String,
+    onProjectColumnChange: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Project (Projects v2)", style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = "Project タイトルを指定するとそのプロジェクトの Issue を表示します。" +
+                "未指定なら下のリポジトリから直接 Issue を取得します。" +
+                "PAT に project スコープが必要です。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        OutlinedTextField(
+            value = projectTitle,
+            onValueChange = onProjectTitleChange,
+            label = { Text("Project タイトル (例: ToDoList)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        OutlinedTextField(
+            value = projectColumn,
+            onValueChange = onProjectColumnChange,
+            label = { Text("カラム名 (例: Todo / Pending / Done。空 = 全カラム)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }
 

@@ -63,8 +63,9 @@ fun MainScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
 
-    // Confirmation dialog state for COMPLETE (Done column move) — only this action requires confirmation.
-    var pendingComplete by remember { mutableStateOf<Pair<Issue, Boolean>?>(null) }
+    // Confirmation dialog state for both PENDING / COMPLETE swipes (carry the action via the issue+isLeft pair).
+    // The actual SwipeAction is re-derived from uiState when the user confirms.
+    var pendingConfirm by remember { mutableStateOf<Pair<Issue, Boolean>?>(null) }
 
     // Refresh on every entry to MAIN (e.g., returning from NewIssue/Settings)
     LaunchedEffect(Unit) { viewModel.refresh() }
@@ -133,9 +134,9 @@ fun MainScreen(
                     },
                     onSwipe = { issue, isLeft ->
                         val action = if (isLeft) uiState.leftSwipeAction else uiState.rightSwipeAction
-                        if (action == SwipeAction.COMPLETE) {
-                            // Defer execution to confirmation dialog. Snap back the row.
-                            pendingComplete = issue to isLeft
+                        // Both PENDING and COMPLETE require explicit confirmation (Project move is destructive).
+                        if (action == SwipeAction.PENDING || action == SwipeAction.COMPLETE) {
+                            pendingConfirm = issue to isLeft
                             false
                         } else {
                             viewModel.applySwipeAction(issue, isLeft)
@@ -147,26 +148,40 @@ fun MainScreen(
         }
     }
 
-    val pending = pendingComplete
+    val pending = pendingConfirm
     if (pending != null) {
         val issue = pending.first
         val isLeft = pending.second
+        val action = if (isLeft) uiState.leftSwipeAction else uiState.rightSwipeAction
         AlertDialog(
-            onDismissRequest = { pendingComplete = null },
-            title = { Text("完了 (Done) に移動しますか?") },
+            onDismissRequest = { pendingConfirm = null },
+            title = { Text("${action.label}しますか?") },
             text = {
-                Text("Issue を close (completed) します。\n\n#${issue.number} ${issue.title}")
+                Text("対象 Issue:\n#${issue.number} ${issue.title}")
             },
             confirmButton = {
                 TextButton(
                     onClick = {
                         viewModel.applySwipeAction(issue, isLeft)
-                        pendingComplete = null
+                        pendingConfirm = null
                     },
                 ) { Text("移動") }
             },
             dismissButton = {
-                TextButton(onClick = { pendingComplete = null }) { Text("キャンセル") }
+                TextButton(onClick = { pendingConfirm = null }) { Text("キャンセル") }
+            },
+        )
+    }
+
+    // Project 未設定時の警告ダイアログ。スワイプアクションは実行されず処理が中断される。
+    val projectMissing = uiState.swipeProjectMissing
+    if (projectMissing != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::consumeSwipeProjectMissing,
+            title = { Text("スワイプ用 Project が未設定") },
+            text = { Text(projectMissing) },
+            confirmButton = {
+                TextButton(onClick = viewModel::consumeSwipeProjectMissing) { Text("OK") }
             },
         )
     }
@@ -285,7 +300,6 @@ private fun SwipeableIssueRow(
 private fun SwipeBackground(action: SwipeAction, direction: SwipeToDismissBoxValue) {
     if (action == SwipeAction.NONE || direction == SwipeToDismissBoxValue.Settled) return
     val color = when (action) {
-        SwipeAction.DELETE -> Color(0xFFD32F2F)
         SwipeAction.COMPLETE -> Color(0xFF388E3C)
         SwipeAction.PENDING -> Color(0xFFF57C00)
         SwipeAction.NONE -> return

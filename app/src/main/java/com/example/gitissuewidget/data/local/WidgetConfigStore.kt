@@ -30,6 +30,16 @@ class WidgetConfigStore(context: Context) {
             } else {
                 prefs.remove(assigneeKey(config.appWidgetId))
             }
+            if (!config.projectTitle.isNullOrBlank()) {
+                prefs[projectTitleKey(config.appWidgetId)] = config.projectTitle.trim()
+            } else {
+                prefs.remove(projectTitleKey(config.appWidgetId))
+            }
+            if (!config.projectColumnName.isNullOrBlank()) {
+                prefs[projectColumnKey(config.appWidgetId)] = config.projectColumnName.trim()
+            } else {
+                prefs.remove(projectColumnKey(config.appWidgetId))
+            }
         }
     }
 
@@ -38,9 +48,13 @@ class WidgetConfigStore(context: Context) {
         // Prefer new multi-repo key, fall back to legacy single-repo string for migration
         val repoNames = prefs[reposKey(appWidgetId)]
             ?: prefs[legacyRepoKey(appWidgetId)]?.let { setOf(it) }
-            ?: return null
-        val repos = repoNames.mapNotNull { RepoRef.parse(it) }
-        if (repos.isEmpty()) return null
+        val projectTitle = prefs[projectTitleKey(appWidgetId)]?.takeIf { it.isNotBlank() }
+        val projectColumn = prefs[projectColumnKey(appWidgetId)]?.takeIf { it.isNotBlank() }
+
+        // A widget is considered "configured" if it has either repos or a project.
+        if (repoNames.isNullOrEmpty() && projectTitle == null) return null
+
+        val repos = repoNames.orEmpty().mapNotNull { RepoRef.parse(it) }
         val state = prefs[stateKey(appWidgetId)]
             ?.let { runCatching { IssueFilter.StateFilter.valueOf(it) }.getOrNull() }
             ?: IssueFilter.StateFilter.OPEN
@@ -52,6 +66,8 @@ class WidgetConfigStore(context: Context) {
             stateFilter = state,
             labels = labels,
             assigneeLogin = assignee,
+            projectTitle = projectTitle,
+            projectColumnName = projectColumn,
         )
     }
 
@@ -62,6 +78,8 @@ class WidgetConfigStore(context: Context) {
             prefs.remove(stateKey(appWidgetId))
             prefs.remove(labelsKey(appWidgetId))
             prefs.remove(assigneeKey(appWidgetId))
+            prefs.remove(projectTitleKey(appWidgetId))
+            prefs.remove(projectColumnKey(appWidgetId))
         }
     }
 
@@ -70,4 +88,6 @@ class WidgetConfigStore(context: Context) {
     private fun stateKey(id: Int) = stringPreferencesKey("widget_${id}_state")
     private fun labelsKey(id: Int) = stringSetPreferencesKey("widget_${id}_labels")
     private fun assigneeKey(id: Int) = stringPreferencesKey("widget_${id}_assignee")
+    private fun projectTitleKey(id: Int) = stringPreferencesKey("widget_${id}_project_title")
+    private fun projectColumnKey(id: Int) = stringPreferencesKey("widget_${id}_project_column")
 }

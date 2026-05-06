@@ -47,6 +47,7 @@ import com.example.gitissuewidget.domain.Label
 import com.example.gitissuewidget.domain.RepoRef
 import com.example.gitissuewidget.domain.SortDirection
 import com.example.gitissuewidget.domain.SortOption
+import com.example.gitissuewidget.domain.WidgetConfig
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -67,9 +68,6 @@ class IssueGlanceWidget : GlanceAppWidget() {
         }.getOrNull()
         val widgetConfig = appWidgetId?.let { container.widgetConfigStore.getConfig(it) }
 
-        val repos: List<RepoRef> = widgetConfig?.repoRefs?.takeIf { it.isNotEmpty() }
-            ?: container.preferenceStore.watchedRepos.first()
-
         val sort = container.preferenceStore.sortOption.first()
         val direction = container.preferenceStore.sortDirection.first()
         val perPage = container.preferenceStore.perPage.first()
@@ -85,36 +83,17 @@ class IssueGlanceWidget : GlanceAppWidget() {
         )
         val displayOptions = WidgetDisplayOptions(showOpenBadge = showOpenBadge, showLabels = showLabels)
 
+        // Project mode takes precedence: if widgetConfig.projectTitle is set, fetch project items.
+        // Otherwise fall back to repository-based fetch.
         val state: WidgetState = when {
             !tokenSet -> WidgetState.NoToken
-            repos.isEmpty() -> WidgetState.NoRepo
+            widgetConfig != null && widgetConfig.isProjectMode ->
+                loadProjectMode(container, widgetConfig, filter, appWidgetId)
             else -> {
-                val title = buildHeaderTitle(repos, filter)
-                val results: List<Pair<RepoRef, Result<List<Issue>>>> = coroutineScope {
-                    repos.map { repo ->
-                        async { repo to container.issueRepository.fetchIssues(repo, filter) }
-                    }.awaitAll()
-                }
-                val successes = results.filter { it.second.isSuccess }
-                if (successes.isEmpty()) {
-                    val cached = appWidgetId?.let { container.issueCacheStore.load(it) }
-                    if (cached != null && cached.issues.isNotEmpty()) {
-                        WidgetState.Loaded(title, cached.issues, staleSinceMillis = cached.savedAtMillis)
-                    } else {
-                        val firstError = results.firstNotNullOfOrNull { it.second.exceptionOrNull() }
-                        WidgetState.Error(
-                            repoName = repos.first().fullName,
-                            message = firstError?.message ?: "取得エラー",
-                        )
-                    }
-                } else {
-                    val merged = successes
-                        .flatMap { it.second.getOrThrow() }
-                        .sortedByFilter(filter.sort, filter.direction)
-                        .take(filter.perPage)
-                    appWidgetId?.let { container.issueCacheStore.save(it, merged) }
-                    WidgetState.Loaded(title, merged, staleSinceMillis = null)
-                }
+                val repos: List<RepoRef> = widgetConfig?.repoRefs?.takeIf { it.isNotEmpty() }
+                    ?: container.preferenceStore.watchedRepos.first()
+                if (repos.isEmpty()) WidgetState.NoRepo
+                else loadRepositoryMode(container, repos, filter, appWidgetId)
             }
         }
 
@@ -133,6 +112,115 @@ private data class WidgetDisplayOptions(
     val showOpenBadge: Boolean = true,
     val showLabels: Boolean = true,
 )
+
+private suspend fun loadRepositoryMode(
+    container: com.example.gitissuewidget.AppContainer,
+    repos: List<RepoRef>,
+    filter: IssueFilter,
+    appWidgetId: Int?,
+): WidgetState {
+    val title = buildHeaderTitle(repos, filter)
+    val results: List<Pair<RepoRef, Result<List<Issue>>>> = coroutineScope {
+        repos.map { repo ->
+            async { repo to container.issueRepository.fetchIssues(repo, filter) }
+        }.awaitAll()
+    }
+    val successes = results.filter { it.second.isSuccess }
+    return if (successes.isEmpty()) {
+        val cached = appWidgetId?.let { container.issueCacheStore.load(it) }
+        if (cached != null && cached.issues.isNotEmpty()) {
+            WidgetState.Loaded(title, cached.issues, staleSinceMillis = cached.savedAtMillis)
+        } else {
+            val firstError = results.firstNotNullOfOrNull { it.second.exceptionOrNull() }
+            WidgetState.Error(
+                repoName = repos.first().fullName,
+                message = firstError?.message ?: "取得エラー",
+            )
+        }
+    } else {
+        val merged = successes
+            .flatMap { it.second.getOrThrow() }
+            .sortedByFilter(filter.sort, filter.direction)
+            .take(filter.perPage)
+        appWidgetId?.let { container.issueCacheStore.save(it, merged) }
+        WidgetState.Loaded(title, merged, staleSinceMillis = null)
+    }
+}
+
+/**
+ * Project モード fetch:
+ * 1. swipe / widget で共有される ProjectMetaCache から meta 解決
+ * 2. `fetchProjectIssues` で対象カラムの Issue 一覧を取得
+ * 3. 旧設定の追加絞り込み (repoRefs / labels / stateFilter) をクライアント側で適用
+ * 4. 全失敗時はキャッシュフォールバック
+ */
+private suspend fun loadProjectMode(
+    container: com.example.gitissuewidget.AppContainer,
+    widgetConfig: WidgetConfig,
+    filter: IssueFilter,
+    appWidgetId: Int?,
+): WidgetState {
+    val projectTitle = widgetConfig.projectTitle.orEmpty()
+    val title = buildProjectHeaderTitle(widgetConfig, filter)
+
+    val metaResult = container.issueRepository.resolveProjectByTitle(projectTitle)
+    val meta = metaResult.getOrElse { e ->
+        return cacheOrError(container, appWidgetId, title, e.message ?: "Project 取得エラー")
+    }
+
+    val itemsResult = container.issueRepository.fetchProjectIssues(
+        projectMeta = meta,
+        columnName = widgetConfig.projectColumnName,
+        perPage = filter.perPage,
+    )
+    val items = itemsResult.getOrElse { e ->
+        return cacheOrError(container, appWidgetId, title, e.message ?: "Project items 取得エラー")
+    }
+
+    val filtered = items.applyAdditionalFilters(widgetConfig)
+        .sortedByFilter(filter.sort, filter.direction)
+        .take(filter.perPage)
+    appWidgetId?.let { container.issueCacheStore.save(it, filtered) }
+    return WidgetState.Loaded(title, filtered, staleSinceMillis = null)
+}
+
+private suspend fun cacheOrError(
+    container: com.example.gitissuewidget.AppContainer,
+    appWidgetId: Int?,
+    title: String,
+    errorMessage: String,
+): WidgetState {
+    val cached = appWidgetId?.let { container.issueCacheStore.load(it) }
+    return if (cached != null && cached.issues.isNotEmpty()) {
+        WidgetState.Loaded(title, cached.issues, staleSinceMillis = cached.savedAtMillis)
+    } else {
+        WidgetState.Error(repoName = title, message = errorMessage)
+    }
+}
+
+private fun List<Issue>.applyAdditionalFilters(config: WidgetConfig): List<Issue> {
+    val byRepo = if (config.repoRefs.isEmpty()) this
+    else filter { it.repoRef in config.repoRefs }
+    val byLabel = if (config.labels.isEmpty()) byRepo
+    else byRepo.filter { issue ->
+        val names = issue.labels.map { it.name.lowercase() }.toSet()
+        config.labels.all { it.lowercase() in names }
+    }
+    return when (config.stateFilter) {
+        IssueFilter.StateFilter.ALL -> byLabel
+        IssueFilter.StateFilter.OPEN -> byLabel.filter { it.state == IssueState.OPEN }
+        IssueFilter.StateFilter.CLOSED -> byLabel.filter { it.state == IssueState.CLOSED }
+    }
+}
+
+private fun buildProjectHeaderTitle(config: WidgetConfig, filter: IssueFilter): String {
+    val parts = mutableListOf<String>()
+    parts += config.projectTitle.orEmpty()
+    if (!config.projectColumnName.isNullOrBlank()) parts += config.projectColumnName
+    if (filter.labels.isNotEmpty()) parts += filter.labels.joinToString(",")
+    if (filter.assignee != null) parts += "@${filter.assignee}"
+    return parts.joinToString(" · ")
+}
 
 private fun buildHeaderTitle(repos: List<RepoRef>, filter: IssueFilter): String {
     val repoLabel = when (repos.size) {

@@ -30,6 +30,8 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -61,6 +63,8 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
+    val availableProjectTitles by viewModel.availableProjectTitles.collectAsStateWithLifecycle()
+    val projectsLoading by viewModel.projectsLoading.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(message) {
@@ -125,6 +129,114 @@ fun SettingsScreen(
                 onLeftChange = viewModel::setLeftSwipeAction,
                 onRightChange = viewModel::setRightSwipeAction,
             )
+            HorizontalDivider()
+            ProjectSection(
+                swipeProjectTitle = uiState.swipeProjectTitle,
+                pendingColumnName = uiState.pendingColumnName,
+                doneColumnName = uiState.doneColumnName,
+                availableProjectTitles = availableProjectTitles,
+                projectsLoading = projectsLoading,
+                onProjectTitleChange = viewModel::setSwipeProjectTitle,
+                onPendingColumnChange = viewModel::setPendingColumnName,
+                onDoneColumnChange = viewModel::setDoneColumnName,
+                onRefreshProjects = viewModel::refreshProjects,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ProjectSection(
+    swipeProjectTitle: String,
+    pendingColumnName: String,
+    doneColumnName: String,
+    availableProjectTitles: List<String>?,
+    projectsLoading: Boolean,
+    onProjectTitleChange: (String) -> Unit,
+    onPendingColumnChange: (String) -> Unit,
+    onDoneColumnChange: (String) -> Unit,
+    onRefreshProjects: () -> Unit,
+) {
+    // Local edit state — only commit on focus loss / blur via onValueChange to keep typing smooth.
+    var titleDraft by remember(swipeProjectTitle) { mutableStateOf(swipeProjectTitle) }
+    var pendingDraft by remember(pendingColumnName) { mutableStateOf(pendingColumnName) }
+    var doneDraft by remember(doneColumnName) { mutableStateOf(doneColumnName) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("スワイプ用 Project (Projects v2)", style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = "PENDING / COMPLETE スワイプ時に Issue を移動させる Project を指定します。\n" +
+                "PAT に project スコープが必要です。Project が未設定 / 見つからない場合、" +
+                "スワイプ時に警告ダイアログが出て処理を中断します。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+
+        OutlinedTextField(
+            value = titleDraft,
+            onValueChange = {
+                titleDraft = it
+                onProjectTitleChange(it)
+            },
+            label = { Text("Project タイトル (例: ToDoList)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = pendingDraft,
+            onValueChange = {
+                pendingDraft = it
+                onPendingColumnChange(it)
+            },
+            label = { Text("Pending カラム名") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = doneDraft,
+            onValueChange = {
+                doneDraft = it
+                onDoneColumnChange(it)
+            },
+            label = { Text("Done カラム名") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(onClick = onRefreshProjects, enabled = !projectsLoading) {
+                Text("Project 一覧を取得")
+            }
+            if (projectsLoading) {
+                CircularProgressIndicator(modifier = Modifier.padding(start = 4.dp))
+            }
+        }
+
+        availableProjectTitles?.let { titles ->
+            if (titles.isEmpty()) {
+                Text("（取得結果: 0 件）", style = MaterialTheme.typography.bodySmall)
+            } else {
+                Text("取得済み Project:", style = MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    Column {
+                        titles.forEach { title ->
+                            AssistChip(
+                                onClick = {
+                                    titleDraft = title
+                                    onProjectTitleChange(title)
+                                },
+                                label = { Text(title) },
+                            )
+                            Spacer(Modifier.height(4.dp))
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -140,8 +252,8 @@ private fun SwipeSection(
         Text("スワイプ操作", style = MaterialTheme.typography.titleMedium)
         Text(
             text = "メイン画面で Issue カードを左右にスワイプしたときの動作。" +
-                "「削除」は close (not_planned)、「完了」は close (completed)、" +
-                "「Pending カラムに移動」は state=open に戻して \"Pending\" ラベルを付与します。",
+                "PENDING / COMPLETE は下の「スワイプ用 Project」で指定した Project の各カラムへ Issue を移動します。" +
+                "実行前に確認ダイアログが表示されます。",
             style = MaterialTheme.typography.bodySmall,
         )
         SwipeActionDropdown(
