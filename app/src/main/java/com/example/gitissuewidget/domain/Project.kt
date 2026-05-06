@@ -24,11 +24,14 @@ data class ProjectColumn(
  * `ProjectMetaCache` の格納単位。
  *
  * @param statusFieldId Status (SingleSelect) フィールドの GraphQL ID
+ * @param dateFieldNames Projects v2 に定義された Date 型カスタムフィールドの名前一覧。
+ *   設定画面の「期限フィールド名」プルダウン候補として使用する。
  */
 data class ProjectMeta(
     val project: Project,
     val statusFieldId: String,
     val columns: List<ProjectColumn>,
+    val dateFieldNames: List<String> = emptyList(),
 ) {
     fun findColumn(name: String): ProjectColumn? =
         columns.firstOrNull { it.name.equals(name, ignoreCase = true) }

@@ -76,8 +76,10 @@ class IssueRepository(
 
     /**
      * 指定 Project の指定カラムの Issue を取得。`columnName` が null の場合は全カラム。
-     * `perPage` は GitHub の `items(first:)` 上限 100 と、カラムフィルタによる削減を見込んで
-     * `perPage*3 (≤100)` を fetch してからクライアント側で絞り込む。
+     * GitHub の `items(first:)` 上限 100 まで取得する。`applyTakeLimit = true` のとき
+     * クライアント側で `take(perPage)` を適用する（追加フィルタが不要なケース用）。
+     * 呼び出し側で state/label/repo 等の追加フィルタを行う場合は `applyTakeLimit = false` を
+     * 渡し、フィルタ後に take すること（さもないと OPEN/CLOSED 偏りで件数が大幅に減る）。
      *
      * @param dueDateFieldName Projects v2 の Date 型カスタムフィールドの名前。マッチした値は
      *   各 Issue の [Issue.dueDate] に入る。null/空のときは抽出をスキップ（dueDate は常に null）。
@@ -87,16 +89,17 @@ class IssueRepository(
         columnName: String?,
         perPage: Int,
         dueDateFieldName: String? = null,
+        applyTakeLimit: Boolean = true,
     ): Result<List<Issue>> = runCatching {
-        val fetchSize = (perPage * 3).coerceIn(perPage, 100)
         val items = graphQl.listProjectItems(
             projectNodeId = projectMeta.project.nodeId,
-            first = fetchSize,
+            first = 100,
             dueDateFieldName = dueDateFieldName,
         )
         val filtered = if (columnName.isNullOrBlank()) items
         else items.filter { it.statusOptionName.equals(columnName, ignoreCase = true) }
-        filtered.map { it.issue }.take(perPage)
+        val mapped = filtered.map { it.issue }
+        if (applyTakeLimit) mapped.take(perPage) else mapped
     }.mapHttpError()
 
     /**

@@ -139,6 +139,7 @@ private fun ConfigureScreen(
     var selectedRepos by remember { mutableStateOf<List<RepoRef>>(emptyList()) }
     var stateFilter by remember { mutableStateOf(IssueFilter.StateFilter.OPEN) }
     var labelInput by remember { mutableStateOf("") }
+    var includeUnlabeled by remember { mutableStateOf(false) }
     var assigneeMe by remember { mutableStateOf(false) }
     var hadExistingConfig by remember { mutableStateOf(false) }
     var projectTitle by remember { mutableStateOf("") }
@@ -150,7 +151,10 @@ private fun ConfigureScreen(
         if (existing != null) {
             hadExistingConfig = true
             stateFilter = existing.stateFilter
-            labelInput = existing.labels.joinToString(", ")
+            // ラベル予約名 LABEL_NONE は別 Switch で表現するため、テキスト入力からは除外する
+            val (specials, normals) = existing.labels.partition { it == WidgetConfig.LABEL_NONE }
+            labelInput = normals.joinToString(", ")
+            includeUnlabeled = specials.isNotEmpty()
             assigneeMe = existing.assigneeLogin != null
             projectTitle = existing.projectTitle.orEmpty()
             projectColumn = existing.projectColumnName.orEmpty()
@@ -226,6 +230,8 @@ private fun ConfigureScreen(
             LabelInput(
                 value = labelInput,
                 onValueChange = { labelInput = it },
+                includeUnlabeled = includeUnlabeled,
+                onIncludeUnlabeledChange = { includeUnlabeled = it },
             )
             HorizontalDivider()
             AssigneeToggle(
@@ -240,10 +246,12 @@ private fun ConfigureScreen(
                 OutlinedButton(onClick = onCancel) { Text("キャンセル") }
                 Button(
                     onClick = {
-                        val labels = labelInput
+                        val typedLabels = labelInput
                             .split(',', '、')
                             .map { it.trim() }
                             .filter { it.isNotEmpty() }
+                        val labels = if (includeUnlabeled) typedLabels + WidgetConfig.LABEL_NONE
+                        else typedLabels
                         onSave(
                             ConfigDraft(
                                 repoRefs = selectedRepos,
@@ -373,7 +381,12 @@ private fun StateFilterPicker(
 }
 
 @Composable
-private fun LabelInput(value: String, onValueChange: (String) -> Unit) {
+private fun LabelInput(
+    value: String,
+    onValueChange: (String) -> Unit,
+    includeUnlabeled: Boolean,
+    onIncludeUnlabeledChange: (Boolean) -> Unit,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text("ラベル絞り込み", style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(
@@ -383,6 +396,13 @@ private fun LabelInput(value: String, onValueChange: (String) -> Unit) {
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text = "ラベルなしも含める", modifier = Modifier.weight(1f))
+            Switch(checked = includeUnlabeled, onCheckedChange = onIncludeUnlabeledChange)
+        }
     }
 }
 

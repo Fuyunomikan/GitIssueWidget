@@ -36,6 +36,8 @@ data class MainUiState(
     val swipeProjectMissing: String? = null,
     /** Open / Closed タブの選択状態。ALL は使用しない。 */
     val selectedStateTab: IssueFilter.StateFilter = IssueFilter.StateFilter.OPEN,
+    /** 期限 (DueDate) を Issue 行に表示するかの設定値。 */
+    val showDueDate: Boolean = true,
 )
 
 class MainViewModel(
@@ -56,6 +58,11 @@ class MainViewModel(
         viewModelScope.launch {
             preferenceStore.rightSwipeAction.collect { value ->
                 _uiState.value = _uiState.value.copy(rightSwipeAction = value)
+            }
+        }
+        viewModelScope.launch {
+            preferenceStore.showDueDate.collect { value ->
+                _uiState.value = _uiState.value.copy(showDueDate = value)
             }
         }
     }
@@ -144,6 +151,7 @@ class MainViewModel(
             columnName = null,
             perPage = filter.perPage,
             dueDateFieldName = dueDateFieldName,
+            applyTakeLimit = false,
         )
             .onFailure { e ->
                 _uiState.value = _uiState.value.copy(
@@ -156,7 +164,9 @@ class MainViewModel(
             IssueFilter.StateFilter.CLOSED -> items.filter { it.state == IssueState.CLOSED }
             IssueFilter.StateFilter.ALL -> items
         }
-        return stateFiltered.sortedByOption(filter.sort, filter.direction)
+        return stateFiltered
+            .sortedByOption(filter.sort, filter.direction)
+            .take(filter.perPage)
     }
 
     private fun List<Issue>.sortedByOption(sort: SortOption, direction: SortDirection): List<Issue> {

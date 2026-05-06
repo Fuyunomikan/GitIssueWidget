@@ -56,6 +56,8 @@ import com.example.gitissuewidget.domain.IssueState
 import com.example.gitissuewidget.domain.Label
 import com.example.gitissuewidget.domain.SwipeAction
 
+private const val SWIPE_THRESHOLD_RATIO = 0.65f
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
@@ -142,6 +144,7 @@ fun MainScreen(
                         issues = uiState.issues,
                         leftSwipeAction = uiState.leftSwipeAction,
                         rightSwipeAction = uiState.rightSwipeAction,
+                        showDueDate = uiState.showDueDate,
                         onClickIssue = { issue ->
                             runCatching {
                                 context.startActivity(Intent(Intent.ACTION_VIEW, issue.htmlUrl.toUri()))
@@ -276,6 +279,7 @@ private fun IssueList(
     issues: List<Issue>,
     leftSwipeAction: SwipeAction,
     rightSwipeAction: SwipeAction,
+    showDueDate: Boolean,
     onClickIssue: (Issue) -> Unit,
     onSwipe: (Issue, isLeftSwipe: Boolean) -> Boolean,
 ) {
@@ -285,6 +289,7 @@ private fun IssueList(
                 issue = issue,
                 leftSwipeAction = leftSwipeAction,
                 rightSwipeAction = rightSwipeAction,
+                showDueDate = showDueDate,
                 onClick = { onClickIssue(issue) },
                 onSwipe = { isLeft -> onSwipe(issue, isLeft) },
             )
@@ -298,6 +303,7 @@ private fun SwipeableIssueRow(
     issue: Issue,
     leftSwipeAction: SwipeAction,
     rightSwipeAction: SwipeAction,
+    showDueDate: Boolean,
     onClick: () -> Unit,
     /** Returns true to dismiss the row, false to snap back. */
     onSwipe: (isLeftSwipe: Boolean) -> Boolean,
@@ -316,6 +322,7 @@ private fun SwipeableIssueRow(
                 SwipeToDismissBoxValue.Settled -> false
             }
         },
+        positionalThreshold = { totalDistance -> totalDistance * SWIPE_THRESHOLD_RATIO },
     )
     // When the issue is updated (PENDING action keeps the row in the list with new updatedAt),
     // reset the swipe state so the row is visible again.
@@ -337,7 +344,7 @@ private fun SwipeableIssueRow(
         enableDismissFromStartToEnd = rightSwipeAction != SwipeAction.NONE,
         enableDismissFromEndToStart = leftSwipeAction != SwipeAction.NONE,
     ) {
-        IssueRow(issue, onClick = onClick)
+        IssueRow(issue, showDueDate = showDueDate, onClick = onClick)
     }
 }
 
@@ -372,7 +379,7 @@ private fun SwipeBackground(action: SwipeAction, direction: SwipeToDismissBoxVal
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun IssueRow(issue: Issue, onClick: () -> Unit) {
+private fun IssueRow(issue: Issue, showDueDate: Boolean, onClick: () -> Unit) {
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier
@@ -388,7 +395,7 @@ private fun IssueRow(issue: Issue, onClick: () -> Unit) {
                 )
                 Text(text = "#${issue.number}", style = MaterialTheme.typography.labelSmall)
                 Text(text = issue.repoRef.fullName, style = MaterialTheme.typography.labelSmall)
-                if (!issue.dueDate.isNullOrBlank()) {
+                if (showDueDate && !issue.dueDate.isNullOrBlank()) {
                     DueDateChip(issue.dueDate)
                 }
             }

@@ -143,10 +143,20 @@ class GitHubGraphQlClient(private val api: GitHubGraphQlApi) {
             val optName = o["name"]?.jsonPrimitive?.content
             if (optId != null && optName != null) ProjectColumn(optId, optName) else null
         }
+        // Date 型カスタムフィールドの名前一覧を抽出（プルダウン候補に使用）
+        val dateFieldNames = obj["fields"]?.jsonObject?.get("nodes")?.jsonArray
+            ?.mapNotNull { node ->
+                val o = node.jsonObject
+                val name = o["name"]?.jsonPrimitive?.content
+                val dataType = o["dataType"]?.jsonPrimitive?.content
+                if (name != null && dataType.equals("DATE", ignoreCase = true)) name else null
+            }
+            ?: emptyList()
         return ProjectMeta(
             project = Project(nodeId = id, number = number, title = title),
             statusFieldId = statusFieldId,
             columns = columns,
+            dateFieldNames = dateFieldNames,
         )
     }
 
@@ -226,6 +236,14 @@ class GitHubGraphQlClient(private val api: GitHubGraphQlApi) {
                       ... on ProjectV2SingleSelectField {
                         id
                         options { id name }
+                      }
+                    }
+                    fields(first: 50) {
+                      nodes {
+                        ... on ProjectV2Field {
+                          name
+                          dataType
+                        }
                       }
                     }
                   }

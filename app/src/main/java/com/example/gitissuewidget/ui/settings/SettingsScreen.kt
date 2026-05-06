@@ -64,6 +64,7 @@ fun SettingsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val availableProjectTitles by viewModel.availableProjectTitles.collectAsStateWithLifecycle()
+    val availableProjects by viewModel.availableProjects.collectAsStateWithLifecycle()
     val projectsLoading by viewModel.projectsLoading.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -119,8 +120,10 @@ fun SettingsScreen(
             DisplaySection(
                 showOpenBadge = uiState.showOpenBadge,
                 showLabels = uiState.showLabels,
+                showDueDate = uiState.showDueDate,
                 onShowOpenBadgeChange = viewModel::setShowOpenBadge,
                 onShowLabelsChange = viewModel::setShowLabels,
+                onShowDueDateChange = viewModel::setShowDueDate,
             )
             HorizontalDivider()
             SwipeSection(
@@ -136,6 +139,7 @@ fun SettingsScreen(
                 doneColumnName = uiState.doneColumnName,
                 dueDateFieldName = uiState.dueDateFieldName,
                 availableProjectTitles = availableProjectTitles,
+                availableProjects = availableProjects,
                 projectsLoading = projectsLoading,
                 onProjectTitleChange = viewModel::setSwipeProjectTitle,
                 onPendingColumnChange = viewModel::setPendingColumnName,
@@ -155,6 +159,7 @@ private fun ProjectSection(
     doneColumnName: String,
     dueDateFieldName: String,
     availableProjectTitles: List<String>?,
+    availableProjects: List<com.example.gitissuewidget.domain.ProjectMeta>?,
     projectsLoading: Boolean,
     onProjectTitleChange: (String) -> Unit,
     onPendingColumnChange: (String) -> Unit,
@@ -164,9 +169,13 @@ private fun ProjectSection(
 ) {
     // Local edit state — only commit on focus loss / blur via onValueChange to keep typing smooth.
     var titleDraft by remember(swipeProjectTitle) { mutableStateOf(swipeProjectTitle) }
-    var pendingDraft by remember(pendingColumnName) { mutableStateOf(pendingColumnName) }
-    var doneDraft by remember(doneColumnName) { mutableStateOf(doneColumnName) }
-    var dueDateDraft by remember(dueDateFieldName) { mutableStateOf(dueDateFieldName) }
+
+    // 選択中の Project のメタを引いて、カラム名 / Date フィールド名のプルダウン候補に使う
+    val selectedMeta = availableProjects?.firstOrNull {
+        it.project.title.equals(titleDraft, ignoreCase = true)
+    }
+    val columnOptions = selectedMeta?.columns?.map { it.name }.orEmpty()
+    val dateFieldOptions = selectedMeta?.dateFieldNames.orEmpty()
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("スワイプ用 Project (Projects v2)", style = MaterialTheme.typography.titleMedium)
@@ -188,43 +197,27 @@ private fun ProjectSection(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        OutlinedTextField(
-            value = pendingDraft,
-            onValueChange = {
-                pendingDraft = it
-                onPendingColumnChange(it)
-            },
-            label = { Text("Pending カラム名") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+        ColumnNameDropdown(
+            label = "Pending カラム名",
+            value = pendingColumnName,
+            options = columnOptions,
+            onValueChange = onPendingColumnChange,
         )
 
-        OutlinedTextField(
-            value = doneDraft,
-            onValueChange = {
-                doneDraft = it
-                onDoneColumnChange(it)
-            },
-            label = { Text("Done カラム名") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+        ColumnNameDropdown(
+            label = "Done カラム名",
+            value = doneColumnName,
+            options = columnOptions,
+            onValueChange = onDoneColumnChange,
         )
 
-        OutlinedTextField(
-            value = dueDateDraft,
-            onValueChange = {
-                dueDateDraft = it
-                onDueDateFieldChange(it)
-            },
-            label = { Text("期限フィールド名 (Date 型カスタムフィールド)") },
-            supportingText = {
-                Text(
-                    "Project に作成した Date 型カスタムフィールドの名前。Issue 行に期限が表示され、" +
-                        "ソート順を「due date」にすると期限順に並び替えできます。",
-                )
-            },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+        ColumnNameDropdown(
+            label = "期限フィールド名 (Date 型カスタムフィールド)",
+            value = dueDateFieldName,
+            options = dateFieldOptions,
+            onValueChange = onDueDateFieldChange,
+            supportingText = "Project に作成した Date 型カスタムフィールドの名前。" +
+                "ソート順「due date」で期限順に並び替えできます。",
         )
 
         Row(
@@ -332,12 +325,84 @@ private fun SwipeActionDropdown(
     }
 }
 
+/**
+ * Project のカラム名 / フィールド名を編集する Composable。
+ * - [options] が空 → 通常の OutlinedTextField (手入力のみ。Project 未取得 / オフライン時のフォールバック)
+ * - [options] が非空 → プルダウンから選択 + 手入力も可能 (typed なので候補にない値も保存できる)
+ *
+ * 入力ごとに [onValueChange] を即時呼び出すため、PreferenceStore に逐次反映される。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ColumnNameDropdown(
+    label: String,
+    value: String,
+    options: List<String>,
+    onValueChange: (String) -> Unit,
+    supportingText: String? = null,
+) {
+    var draft by remember(value) { mutableStateOf(value) }
+    var expanded by remember { mutableStateOf(false) }
+
+    if (options.isEmpty()) {
+        OutlinedTextField(
+            value = draft,
+            onValueChange = {
+                draft = it
+                onValueChange(it)
+            },
+            label = { Text(label) },
+            singleLine = true,
+            supportingText = supportingText?.let { { Text(it) } },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        return
+    }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+    ) {
+        OutlinedTextField(
+            value = draft,
+            onValueChange = {
+                draft = it
+                onValueChange(it)
+            },
+            label = { Text(label) },
+            singleLine = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            supportingText = supportingText?.let { { Text(it) } },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryEditable),
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        draft = option
+                        onValueChange(option)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun DisplaySection(
     showOpenBadge: Boolean,
     showLabels: Boolean,
+    showDueDate: Boolean,
     onShowOpenBadgeChange: (Boolean) -> Unit,
     onShowLabelsChange: (Boolean) -> Unit,
+    onShowDueDateChange: (Boolean) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("ウィジェット表示項目", style = MaterialTheme.typography.titleMedium)
@@ -350,6 +415,11 @@ private fun DisplaySection(
             label = "ラベル",
             checked = showLabels,
             onCheckedChange = onShowLabelsChange,
+        )
+        DisplayToggleRow(
+            label = "期限 (Due Date)",
+            checked = showDueDate,
+            onCheckedChange = onShowDueDateChange,
         )
     }
 }

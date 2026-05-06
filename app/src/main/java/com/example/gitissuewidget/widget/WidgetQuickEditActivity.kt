@@ -338,20 +338,28 @@ private fun LabelsDropdownSection(
         Spacer(Modifier.height(4.dp))
         when {
             loading -> Text("ラベル取得中...", style = MaterialTheme.typography.bodySmall)
-            available.isEmpty() -> Text(
-                "利用可能なラベルがありません",
-                style = MaterialTheme.typography.bodySmall,
-            )
             else -> FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                available.forEach { label ->
-                    FilterChip(
-                        selected = label.name in selected,
-                        onClick = { onToggle(label.name) },
-                        label = { Text(label.name) },
+                FilterChip(
+                    selected = WidgetConfig.LABEL_NONE in selected,
+                    onClick = { onToggle(WidgetConfig.LABEL_NONE) },
+                    label = { Text(WidgetConfig.LABEL_NONE_DISPLAY) },
+                )
+                if (available.isEmpty()) {
+                    Text(
+                        "利用可能なラベルがありません",
+                        style = MaterialTheme.typography.bodySmall,
                     )
+                } else {
+                    available.forEach { label ->
+                        FilterChip(
+                            selected = label.name in selected,
+                            onClick = { onToggle(label.name) },
+                            label = { Text(label.name) },
+                        )
+                    }
                 }
             }
         }

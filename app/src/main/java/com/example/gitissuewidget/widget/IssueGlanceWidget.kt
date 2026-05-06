@@ -75,6 +75,7 @@ class IssueGlanceWidget : GlanceAppWidget() {
         val perPage = container.preferenceStore.perPage.first()
         val showOpenBadge = container.preferenceStore.showOpenBadge.first()
         val showLabels = container.preferenceStore.showLabels.first()
+        val showDueDate = container.preferenceStore.showDueDate.first()
         val dueDateFieldName = container.preferenceStore.dueDateFieldName.first()
         val filter = IssueFilter(
             stateFilter = widgetConfig?.stateFilter ?: IssueFilter.StateFilter.OPEN,
@@ -84,7 +85,11 @@ class IssueGlanceWidget : GlanceAppWidget() {
             direction = direction,
             perPage = perPage,
         )
-        val displayOptions = WidgetDisplayOptions(showOpenBadge = showOpenBadge, showLabels = showLabels)
+        val displayOptions = WidgetDisplayOptions(
+            showOpenBadge = showOpenBadge,
+            showLabels = showLabels,
+            showDueDate = showDueDate,
+        )
 
         // Project mode takes precedence: if widgetConfig.projectTitle is set, fetch project items.
         // Otherwise fall back to repository-based fetch.
@@ -121,6 +126,7 @@ class IssueGlanceWidget : GlanceAppWidget() {
 private data class WidgetDisplayOptions(
     val showOpenBadge: Boolean = true,
     val showLabels: Boolean = true,
+    val showDueDate: Boolean = true,
 )
 
 private suspend fun loadRepositoryMode(
@@ -184,6 +190,7 @@ private suspend fun loadProjectMode(
         columnName = widgetConfig.projectColumnName,
         perPage = filter.perPage,
         dueDateFieldName = dueDateFieldName,
+        applyTakeLimit = false,
     )
     val items = itemsResult.getOrElse { e ->
         return cacheOrError(container, appWidgetId, title, e.message ?: "Project items 取得エラー")
@@ -213,15 +220,29 @@ private suspend fun cacheOrError(
 private fun List<Issue>.applyAdditionalFilters(config: WidgetConfig): List<Issue> {
     val byRepo = if (config.repoRefs.isEmpty()) this
     else filter { it.repoRef in config.repoRefs }
-    val byLabel = if (config.labels.isEmpty()) byRepo
-    else byRepo.filter { issue ->
-        val names = issue.labels.map { it.name.lowercase() }.toSet()
-        config.labels.all { it.lowercase() in names }
-    }
+    val byLabel = byRepo.filterByLabelConfig(config.labels)
     return when (config.stateFilter) {
         IssueFilter.StateFilter.ALL -> byLabel
         IssueFilter.StateFilter.OPEN -> byLabel.filter { it.state == IssueState.OPEN }
         IssueFilter.StateFilter.CLOSED -> byLabel.filter { it.state == IssueState.CLOSED }
+    }
+}
+
+/**
+ * ラベル設定によるフィルタ。
+ * - 設定が空 → 全件通す
+ * - [WidgetConfig.LABEL_NONE] のみ → ラベル空 Issue のみ
+ * - 通常ラベルあり → 通常ラベルすべてを満たす Issue。さらに LABEL_NONE が含まれていればラベル空 Issue も OR で許可
+ */
+private fun List<Issue>.filterByLabelConfig(configLabels: List<String>): List<Issue> {
+    if (configLabels.isEmpty()) return this
+    val includeUnlabeled = configLabels.any { it == WidgetConfig.LABEL_NONE }
+    val normalLabels = configLabels.filter { it != WidgetConfig.LABEL_NONE }.map { it.lowercase() }
+    return filter { issue ->
+        val names = issue.labels.map { it.name.lowercase() }.toSet()
+        val matchesNormal = normalLabels.isNotEmpty() && normalLabels.all { it in names }
+        val matchesUnlabeled = includeUnlabeled && issue.labels.isEmpty()
+        matchesNormal || matchesUnlabeled
     }
 }
 
@@ -423,7 +444,7 @@ private fun IssueRow(issue: Issue, displayOptions: WidgetDisplayOptions, showRep
                     color = ColorProvider(day = ComposeColor(0xFF666666), night = ComposeColor(0xFFAAAAAA)),
                 ),
             )
-            if (!issue.dueDate.isNullOrBlank()) {
+            if (displayOptions.showDueDate && !issue.dueDate.isNullOrBlank()) {
                 Spacer(GlanceModifier.width(6.dp))
                 DueDateBadge(issue.dueDate)
             }

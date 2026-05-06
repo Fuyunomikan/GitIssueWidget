@@ -23,4 +23,16 @@ data class WidgetConfig(
 ) {
     /** Project モードで動作するかどうか。 */
     val isProjectMode: Boolean get() = !projectTitle.isNullOrBlank()
+
+    companion object {
+        /**
+         * [labels] に含めると「ラベルが 1 つも付いていない Issue」を表示対象に加えるための予約名。
+         * 通常のラベル名と衝突しないよう `__` で囲んでいる。
+         * フィルタロジックは `(通常ラベルすべて満たす) OR (この予約名 AND ラベル空)`。
+         */
+        const val LABEL_NONE = "__NO_LABEL__"
+
+        /** UI 上の表示文言。チップに表示するラベル候補。 */
+        const val LABEL_NONE_DISPLAY = "(ラベルなし)"
+    }
 }

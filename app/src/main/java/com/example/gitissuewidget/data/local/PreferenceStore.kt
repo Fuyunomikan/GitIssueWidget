@@ -48,6 +48,7 @@ class PreferenceStore(context: Context) {
 
     val showOpenBadge: Flow<Boolean> = dataStore.data.map { it[KEY_SHOW_OPEN_BADGE] ?: true }
     val showLabels: Flow<Boolean> = dataStore.data.map { it[KEY_SHOW_LABELS] ?: true }
+    val showDueDate: Flow<Boolean> = dataStore.data.map { it[KEY_SHOW_DUE_DATE] ?: true }
 
     val leftSwipeAction: Flow<SwipeAction> = dataStore.data.map { prefs ->
         prefs[KEY_LEFT_SWIPE]?.let { runCatching { SwipeAction.valueOf(it) }.getOrNull() }
@@ -121,6 +122,10 @@ class PreferenceStore(context: Context) {
         dataStore.edit { it[KEY_SHOW_LABELS] = value }
     }
 
+    suspend fun setShowDueDate(value: Boolean) {
+        dataStore.edit { it[KEY_SHOW_DUE_DATE] = value }
+    }
+
     suspend fun setLeftSwipeAction(value: SwipeAction) {
         dataStore.edit { it[KEY_LEFT_SWIPE] = value.name }
     }
@@ -156,6 +161,7 @@ class PreferenceStore(context: Context) {
         private val KEY_WATCHED_REPOS = stringSetPreferencesKey("watched_repos")
         private val KEY_SHOW_OPEN_BADGE = booleanPreferencesKey("show_open_badge")
         private val KEY_SHOW_LABELS = booleanPreferencesKey("show_labels")
+        private val KEY_SHOW_DUE_DATE = booleanPreferencesKey("show_due_date")
         private val KEY_LEFT_SWIPE = stringPreferencesKey("left_swipe_action")
         private val KEY_RIGHT_SWIPE = stringPreferencesKey("right_swipe_action")
         private val KEY_SWIPE_PROJECT_TITLE = stringPreferencesKey("swipe_project_title")

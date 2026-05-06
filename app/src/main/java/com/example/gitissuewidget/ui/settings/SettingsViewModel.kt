@@ -9,6 +9,7 @@ import com.example.gitissuewidget.IssueWidgetApp
 import com.example.gitissuewidget.data.local.PreferenceStore
 import com.example.gitissuewidget.data.local.TokenStore
 import com.example.gitissuewidget.data.repo.IssueRepository
+import com.example.gitissuewidget.domain.ProjectMeta
 import com.example.gitissuewidget.domain.RepoRef
 import com.example.gitissuewidget.domain.SortDirection
 import com.example.gitissuewidget.domain.SortOption
@@ -29,6 +30,7 @@ data class SettingsUiState(
     val perPage: Int = PreferenceStore.DEFAULT_PER_PAGE,
     val showOpenBadge: Boolean = true,
     val showLabels: Boolean = true,
+    val showDueDate: Boolean = true,
     val leftSwipeAction: SwipeAction = SwipeAction.NONE,
     val rightSwipeAction: SwipeAction = SwipeAction.NONE,
     val swipeProjectTitle: String = "",
@@ -48,6 +50,7 @@ private data class BasicPrefs(
 private data class DisplayPrefs(
     val showOpenBadge: Boolean,
     val showLabels: Boolean,
+    val showDueDate: Boolean,
 )
 
 private data class SwipePrefs(
@@ -83,7 +86,8 @@ class SettingsViewModel(
     private val displayFlow = combine(
         preferenceStore.showOpenBadge,
         preferenceStore.showLabels,
-    ) { open, labels -> DisplayPrefs(open, labels) }
+        preferenceStore.showDueDate,
+    ) { open, labels, due -> DisplayPrefs(open, labels, due) }
 
     private val swipeFlow = combine(
         preferenceStore.leftSwipeAction,
@@ -113,6 +117,7 @@ class SettingsViewModel(
             perPage = basic.perPage,
             showOpenBadge = display.showOpenBadge,
             showLabels = display.showLabels,
+            showDueDate = display.showDueDate,
             leftSwipeAction = swipe.left,
             rightSwipeAction = swipe.right,
             swipeProjectTitle = project.swipeProjectTitle,
@@ -128,6 +133,13 @@ class SettingsViewModel(
     /** GraphQL で取得済みの viewer Project タイトル一覧。null = 未取得。 */
     private val _availableProjectTitles = MutableStateFlow<List<String>?>(null)
     val availableProjectTitles: StateFlow<List<String>?> = _availableProjectTitles.asStateFlow()
+
+    /**
+     * GraphQL で取得済みの viewer Project メタ一覧。null = 未取得。
+     * 選択中の Project (タイトル一致) からカラム名 / Date フィールド名のプルダウン候補を引くために保持。
+     */
+    private val _availableProjects = MutableStateFlow<List<ProjectMeta>?>(null)
+    val availableProjects: StateFlow<List<ProjectMeta>?> = _availableProjects.asStateFlow()
 
     private val _projectsLoading = MutableStateFlow(false)
     val projectsLoading: StateFlow<Boolean> = _projectsLoading.asStateFlow()
@@ -188,6 +200,10 @@ class SettingsViewModel(
         viewModelScope.launch { preferenceStore.setShowLabels(value) }
     }
 
+    fun setShowDueDate(value: Boolean) {
+        viewModelScope.launch { preferenceStore.setShowDueDate(value) }
+    }
+
     fun setLeftSwipeAction(value: SwipeAction) {
         viewModelScope.launch { preferenceStore.setLeftSwipeAction(value) }
     }
@@ -223,6 +239,7 @@ class SettingsViewModel(
             issueRepository.listAvailableProjects(forceRefresh = true)
                 .onSuccess { metas ->
                     _availableProjectTitles.value = metas.map { it.project.title }
+                    _availableProjects.value = metas
                     _message.value = if (metas.isEmpty()) {
                         "Project が見つかりませんでした (PAT に project スコープがあるか確認してください)"
                     } else {
