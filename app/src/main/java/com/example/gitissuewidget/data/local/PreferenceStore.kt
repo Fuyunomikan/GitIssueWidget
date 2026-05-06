@@ -91,6 +91,19 @@ class PreferenceStore(context: Context) {
         prefs[KEY_DUE_DATE_FIELD]?.takeIf { it.isNotBlank() } ?: DEFAULT_DUE_DATE_FIELD
     }
 
+    /** 期限通知を有効にするか。デフォルト false。 */
+    val notificationEnabled: Flow<Boolean> = dataStore.data.map { it[KEY_NOTIFICATION_ENABLED] ?: false }
+
+    /** 期限通知を発火する時刻（時, 0-23）。デフォルト [DEFAULT_NOTIFICATION_HOUR]。 */
+    val notificationHour: Flow<Int> = dataStore.data.map { prefs ->
+        (prefs[KEY_NOTIFICATION_HOUR] ?: DEFAULT_NOTIFICATION_HOUR).coerceIn(0, 23)
+    }
+
+    /** 期限通知を発火する時刻（分, 0-59）。デフォルト [DEFAULT_NOTIFICATION_MINUTE]。 */
+    val notificationMinute: Flow<Int> = dataStore.data.map { prefs ->
+        (prefs[KEY_NOTIFICATION_MINUTE] ?: DEFAULT_NOTIFICATION_MINUTE).coerceIn(0, 59)
+    }
+
     suspend fun setSortOption(value: SortOption) {
         dataStore.edit { it[KEY_SORT_OPTION] = value.name }
     }
@@ -166,6 +179,17 @@ class PreferenceStore(context: Context) {
         dataStore.edit { it[KEY_DUE_DATE_FIELD] = value.trim().ifBlank { DEFAULT_DUE_DATE_FIELD } }
     }
 
+    suspend fun setNotificationEnabled(value: Boolean) {
+        dataStore.edit { it[KEY_NOTIFICATION_ENABLED] = value }
+    }
+
+    suspend fun setNotificationTime(hour: Int, minute: Int) {
+        dataStore.edit {
+            it[KEY_NOTIFICATION_HOUR] = hour.coerceIn(0, 23)
+            it[KEY_NOTIFICATION_MINUTE] = minute.coerceIn(0, 59)
+        }
+    }
+
     companion object {
         private val KEY_SORT_OPTION = stringPreferencesKey("sort_option")
         private val KEY_SORT_DIRECTION = stringPreferencesKey("sort_direction")
@@ -182,6 +206,9 @@ class PreferenceStore(context: Context) {
         private val KEY_PENDING_COLUMN_NAME = stringPreferencesKey("pending_column_name")
         private val KEY_DONE_COLUMN_NAME = stringPreferencesKey("done_column_name")
         private val KEY_DUE_DATE_FIELD = stringPreferencesKey("due_date_field_name")
+        private val KEY_NOTIFICATION_ENABLED = booleanPreferencesKey("notification_enabled")
+        private val KEY_NOTIFICATION_HOUR = intPreferencesKey("notification_hour")
+        private val KEY_NOTIFICATION_MINUTE = intPreferencesKey("notification_minute")
 
         const val DEFAULT_PER_PAGE = 20
         const val DEFAULT_REFRESH_INTERVAL = 30
@@ -189,5 +216,7 @@ class PreferenceStore(context: Context) {
         const val DEFAULT_DONE_COLUMN = "Done"
         const val DEFAULT_DUE_DATE_FIELD = "Due Date"
         const val DEFAULT_DUE_DATE_WARNING_DAYS = 3
+        const val DEFAULT_NOTIFICATION_HOUR = 8
+        const val DEFAULT_NOTIFICATION_MINUTE = 0
     }
 }

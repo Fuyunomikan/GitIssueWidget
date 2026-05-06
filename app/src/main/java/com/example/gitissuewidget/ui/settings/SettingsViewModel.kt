@@ -1,5 +1,6 @@
 package com.example.gitissuewidget.ui.settings
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -14,11 +15,14 @@ import com.example.gitissuewidget.domain.RepoRef
 import com.example.gitissuewidget.domain.SortDirection
 import com.example.gitissuewidget.domain.SortOption
 import com.example.gitissuewidget.domain.SwipeAction
+import com.example.gitissuewidget.widget.DueDateNotificationWorker
+import com.example.gitissuewidget.widget.TestNotificationWorker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -38,6 +42,9 @@ data class SettingsUiState(
     val pendingColumnName: String = PreferenceStore.DEFAULT_PENDING_COLUMN,
     val doneColumnName: String = PreferenceStore.DEFAULT_DONE_COLUMN,
     val dueDateFieldName: String = PreferenceStore.DEFAULT_DUE_DATE_FIELD,
+    val notificationEnabled: Boolean = false,
+    val notificationHour: Int = PreferenceStore.DEFAULT_NOTIFICATION_HOUR,
+    val notificationMinute: Int = PreferenceStore.DEFAULT_NOTIFICATION_MINUTE,
 )
 
 private data class BasicPrefs(
@@ -67,7 +74,14 @@ private data class ProjectPrefs(
     val dueDateFieldName: String,
 )
 
+private data class NotificationPrefs(
+    val enabled: Boolean,
+    val hour: Int,
+    val minute: Int,
+)
+
 class SettingsViewModel(
+    private val appContext: Context,
     private val tokenStore: TokenStore,
     private val preferenceStore: PreferenceStore,
     private val issueRepository: IssueRepository,
@@ -106,12 +120,19 @@ class SettingsViewModel(
         ProjectPrefs(title.orEmpty(), pending, done, dueField)
     }
 
+    private val notificationFlow = combine(
+        preferenceStore.notificationEnabled,
+        preferenceStore.notificationHour,
+        preferenceStore.notificationMinute,
+    ) { enabled, hour, minute -> NotificationPrefs(enabled, hour, minute) }
+
     val uiState: StateFlow<SettingsUiState> = combine(
         basicFlow,
         displayFlow,
         swipeFlow,
         projectFlow,
-    ) { basic, display, swipe, project ->
+        notificationFlow,
+    ) { basic, display, swipe, project, notify ->
         SettingsUiState(
             tokenSaved = basic.tokenSaved,
             watchedRepos = basic.watchedRepos,
@@ -128,6 +149,9 @@ class SettingsViewModel(
             pendingColumnName = project.pendingColumnName,
             doneColumnName = project.doneColumnName,
             dueDateFieldName = project.dueDateFieldName,
+            notificationEnabled = notify.enabled,
+            notificationHour = notify.hour,
+            notificationMinute = notify.minute,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
@@ -237,6 +261,41 @@ class SettingsViewModel(
     }
 
     /**
+     * 通知の ON/OFF 切替。ON にしたときは即座に次回発火を WorkManager にエンキュー、
+     * OFF にしたときは予約済みのワークをキャンセルする。
+     */
+    fun setNotificationEnabled(value: Boolean) {
+        viewModelScope.launch {
+            preferenceStore.setNotificationEnabled(value)
+            if (value) {
+                val hour = preferenceStore.notificationHour.first()
+                val minute = preferenceStore.notificationMinute.first()
+                DueDateNotificationWorker.schedule(appContext, hour, minute)
+                _message.value = "通知を有効にしました"
+            } else {
+                DueDateNotificationWorker.cancel(appContext)
+                _message.value = "通知を無効にしました"
+            }
+        }
+    }
+
+    /** 通知時刻の更新。enabled なら新しい時刻で再エンキュー。 */
+    fun setNotificationTime(hour: Int, minute: Int) {
+        viewModelScope.launch {
+            preferenceStore.setNotificationTime(hour, minute)
+            if (preferenceStore.notificationEnabled.first()) {
+                DueDateNotificationWorker.schedule(appContext, hour, minute)
+            }
+        }
+    }
+
+    /** DebugOption の「通知テスト」: 数秒後にテスト通知を発火させる。 */
+    fun triggerTestNotification() {
+        TestNotificationWorker.trigger(appContext, delaySeconds = 5)
+        _message.value = "5秒後にテスト通知を表示します"
+    }
+
+    /**
      * viewer の Projects v2 一覧を GraphQL で取得し、タイトル一覧をUIに反映する。
      * PAT に project スコープが無い場合・Project が無い場合はエラーメッセージを Snackbar に出す。
      */
@@ -270,6 +329,7 @@ class SettingsViewModel(
             initializer {
                 val app = this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as IssueWidgetApp
                 SettingsViewModel(
+                    appContext = app.applicationContext,
                     tokenStore = app.container.tokenStore,
                     preferenceStore = app.container.preferenceStore,
                     issueRepository = app.container.issueRepository,

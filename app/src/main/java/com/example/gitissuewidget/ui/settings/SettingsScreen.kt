@@ -1,5 +1,10 @@
 package com.example.gitissuewidget.ui.settings
 
+import android.Manifest
+import android.app.TimePickerDialog
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
@@ -152,6 +158,90 @@ fun SettingsScreen(
                 onDueDateFieldChange = viewModel::setDueDateFieldName,
                 onRefreshProjects = viewModel::refreshProjects,
             )
+            HorizontalDivider()
+            NotificationSection(
+                enabled = uiState.notificationEnabled,
+                hour = uiState.notificationHour,
+                minute = uiState.notificationMinute,
+                onEnabledChange = viewModel::setNotificationEnabled,
+                onTimeChange = viewModel::setNotificationTime,
+            )
+            HorizontalDivider()
+            DebugSection(
+                onTestNotification = viewModel::triggerTestNotification,
+            )
+        }
+    }
+}
+
+@Composable
+private fun NotificationSection(
+    enabled: Boolean,
+    hour: Int,
+    minute: Int,
+    onEnabledChange: (Boolean) -> Unit,
+    onTimeChange: (Int, Int) -> Unit,
+) {
+    val context = LocalContext.current
+    // Android 13+ で POST_NOTIFICATIONS が拒否された状態で enable しても通知が出ないので、
+    // toggle ON 時にランチャーで権限要求 → 結果に関わらず enable は反映する（拒否時は端末側で無視されるだけ）。
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { _ -> /* 結果は使わない: 設定アプリから後付けで許可してもそのまま動く */ }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("通知", style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = "指定した時刻に Issue 期限を確認し、期限が近いものがあれば通知します。" +
+                "「スワイプ用 Project」と「期限警告 (あと〇日)」の設定値を使用するため、" +
+                "Project と期限フィールドを先に設定してください。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        DisplayToggleRow(
+            label = "期限通知を有効にする",
+            checked = enabled,
+            onCheckedChange = { newValue ->
+                if (newValue && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                onEnabledChange(newValue)
+            },
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("通知時刻", modifier = Modifier.weight(1f))
+            OutlinedButton(
+                enabled = enabled,
+                onClick = {
+                    TimePickerDialog(
+                        context,
+                        { _, h, m -> onTimeChange(h, m) },
+                        hour,
+                        minute,
+                        true,
+                    ).show()
+                },
+            ) {
+                Text("%02d:%02d".format(hour, minute))
+            }
+        }
+    }
+}
+
+@Composable
+private fun DebugSection(
+    onTestNotification: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("DebugOption", style = MaterialTheme.typography.titleMedium)
+        Text(
+            text = "通知テストは数秒後に端末に通知を 1 件ポストします。",
+            style = MaterialTheme.typography.bodySmall,
+        )
+        OutlinedButton(onClick = onTestNotification) {
+            Text("通知テスト")
         }
     }
 }
