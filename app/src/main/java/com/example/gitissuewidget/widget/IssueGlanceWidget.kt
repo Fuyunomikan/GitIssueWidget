@@ -40,6 +40,8 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import com.example.gitissuewidget.IssueWidgetApp
+import com.example.gitissuewidget.MainActivity
+import com.example.gitissuewidget.R
 import com.example.gitissuewidget.domain.Issue
 import com.example.gitissuewidget.domain.IssueFilter
 import com.example.gitissuewidget.domain.IssueState
@@ -98,14 +100,21 @@ class IssueGlanceWidget : GlanceAppWidget() {
             }
         }
 
-        val editAction: Action? = appWidgetId?.let { id ->
+        val configureAction: Action? = appWidgetId?.let { id ->
             val intent = Intent(context, WidgetQuickEditActivity::class.java)
                 .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             actionStartActivity(intent)
         }
 
-        provideContent { WidgetContent(state, displayOptions, editAction) }
+        val addIssueAction: Action = run {
+            val intent = Intent(context, MainActivity::class.java)
+                .putExtra(MainActivity.EXTRA_OPEN_NEW_ISSUE, true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            actionStartActivity(intent)
+        }
+
+        provideContent { WidgetContent(state, displayOptions, addIssueAction, configureAction) }
     }
 }
 
@@ -269,7 +278,12 @@ private sealed interface WidgetState {
 }
 
 @androidx.compose.runtime.Composable
-private fun WidgetContent(state: WidgetState, displayOptions: WidgetDisplayOptions, editAction: Action?) {
+private fun WidgetContent(
+    state: WidgetState,
+    displayOptions: WidgetDisplayOptions,
+    addIssueAction: Action?,
+    configureAction: Action?,
+) {
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
@@ -282,7 +296,8 @@ private fun WidgetContent(state: WidgetState, displayOptions: WidgetDisplayOptio
                 is WidgetState.Error -> state.repoName
                 else -> "GitHub Issue"
             },
-            editAction = editAction,
+            addIssueAction = addIssueAction,
+            configureAction = configureAction,
         )
         if (state is WidgetState.Loaded && state.staleSinceMillis != null) {
             StaleNotice(state.staleSinceMillis)
@@ -324,7 +339,8 @@ private fun StaleNotice(savedAtMillis: Long) {
 }
 
 @androidx.compose.runtime.Composable
-private fun Header(title: String, editAction: Action?) {
+private fun Header(title: String, addIssueAction: Action?, configureAction: Action?) {
+    val iconTint = ColorProvider(day = ComposeColor(0xFF555555), night = ComposeColor(0xFFCCCCCC))
     Row(
         modifier = GlanceModifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -339,29 +355,36 @@ private fun Header(title: String, editAction: Action?) {
             maxLines = 1,
             modifier = GlanceModifier.defaultWeight(),
         )
-        if (editAction != null) {
-            Image(
-                provider = ImageProvider(android.R.drawable.ic_menu_edit),
-                contentDescription = "編集",
-                colorFilter = ColorFilter.tint(
-                    ColorProvider(day = ComposeColor(0xFF555555), night = ComposeColor(0xFFCCCCCC)),
-                ),
-                modifier = GlanceModifier
-                    .size(20.dp)
-                    .clickable(editAction),
-            )
-            Spacer(GlanceModifier.width(8.dp))
-        }
         Image(
             provider = ImageProvider(android.R.drawable.ic_popup_sync),
             contentDescription = "更新",
-            colorFilter = ColorFilter.tint(
-                ColorProvider(day = ComposeColor(0xFF555555), night = ComposeColor(0xFFCCCCCC)),
-            ),
+            colorFilter = ColorFilter.tint(iconTint),
             modifier = GlanceModifier
                 .size(20.dp)
                 .clickable(actionRunCallback<RefreshAction>()),
         )
+        if (addIssueAction != null) {
+            Spacer(GlanceModifier.width(8.dp))
+            Image(
+                provider = ImageProvider(R.drawable.ic_widget_add),
+                contentDescription = "Issue追加",
+                colorFilter = ColorFilter.tint(iconTint),
+                modifier = GlanceModifier
+                    .size(20.dp)
+                    .clickable(addIssueAction),
+            )
+        }
+        if (configureAction != null) {
+            Spacer(GlanceModifier.width(8.dp))
+            Image(
+                provider = ImageProvider(R.drawable.ic_widget_more_vert),
+                contentDescription = "ウィジェット設定",
+                colorFilter = ColorFilter.tint(iconTint),
+                modifier = GlanceModifier
+                    .size(20.dp)
+                    .clickable(configureAction),
+            )
+        }
     }
 }
 
