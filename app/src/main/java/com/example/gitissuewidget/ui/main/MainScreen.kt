@@ -19,15 +19,18 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -48,6 +51,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.gitissuewidget.domain.Issue
+import com.example.gitissuewidget.domain.IssueFilter
 import com.example.gitissuewidget.domain.IssueState
 import com.example.gitissuewidget.domain.Label
 import com.example.gitissuewidget.domain.SwipeAction
@@ -102,9 +106,7 @@ fun MainScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .padding(padding),
         ) {
             StatusCard(
                 tokenSet = uiState.tokenSet,
@@ -113,37 +115,51 @@ fun MainScreen(
                 onOpenSettings = onOpenSettings,
             )
 
-            if (uiState.loading) {
-                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            }
+            HorizontalDivider()
 
-            when {
-                !uiState.tokenSet -> EmptyHint("設定画面でPATを登録してください。")
-                uiState.watchedRepos.isEmpty() -> EmptyHint("設定画面で監視リポジトリを追加してください。")
-                uiState.issues.isEmpty() && !uiState.loading -> EmptyHint("Issueが見つかりません。")
-                else -> IssueList(
-                    issues = uiState.issues,
-                    leftSwipeAction = uiState.leftSwipeAction,
-                    rightSwipeAction = uiState.rightSwipeAction,
-                    onClickIssue = { issue ->
-                        runCatching {
-                            context.startActivity(Intent(Intent.ACTION_VIEW, issue.htmlUrl.toUri()))
-                        }
-                    },
-                    onSwipe = { issue, isLeft ->
-                        val action = if (isLeft) uiState.leftSwipeAction else uiState.rightSwipeAction
-                        // Both PENDING and COMPLETE require explicit confirmation (Project move is destructive).
-                        if (action == SwipeAction.PENDING || action == SwipeAction.COMPLETE) {
-                            pendingConfirm = issue to isLeft
-                            false
-                        } else {
-                            viewModel.applySwipeAction(issue, isLeft)
-                            true
-                        }
-                    },
-                )
+            StateFilterTabs(
+                selected = uiState.selectedStateTab,
+                onSelect = viewModel::setStateTab,
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (uiState.loading) {
+                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                }
+
+                when {
+                    !uiState.tokenSet -> EmptyHint("設定画面でPATを登録してください。")
+                    uiState.watchedRepos.isEmpty() -> EmptyHint("設定画面で監視リポジトリを追加してください。")
+                    uiState.issues.isEmpty() && !uiState.loading -> EmptyHint("Issueが見つかりません。")
+                    else -> IssueList(
+                        issues = uiState.issues,
+                        leftSwipeAction = uiState.leftSwipeAction,
+                        rightSwipeAction = uiState.rightSwipeAction,
+                        onClickIssue = { issue ->
+                            runCatching {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, issue.htmlUrl.toUri()))
+                            }
+                        },
+                        onSwipe = { issue, isLeft ->
+                            val action = if (isLeft) uiState.leftSwipeAction else uiState.rightSwipeAction
+                            // Both PENDING and COMPLETE require explicit confirmation (Project move is destructive).
+                            if (action == SwipeAction.PENDING || action == SwipeAction.COMPLETE) {
+                                pendingConfirm = issue to isLeft
+                                false
+                            } else {
+                                viewModel.applySwipeAction(issue, isLeft)
+                                true
+                            }
+                        },
+                    )
+                }
             }
         }
     }
@@ -194,12 +210,17 @@ private fun StatusCard(
     repoCount: Int,
     onOpenSettings: () -> Unit,
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    // Issue カードと識別しやすいよう、ログイン状態セクションだけ黒背景＋白文字で固定表示する。
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = Color.Black,
+        contentColor = Color.White,
+    ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 text = if (tokenSet) "ログイン状態: 認証済み" else "ログイン状態: 未ログイン",
                 style = MaterialTheme.typography.titleMedium,
-                color = if (tokenSet) Color(0xFF2E7D32) else MaterialTheme.colorScheme.error,
+                color = if (tokenSet) Color(0xFF66BB6A) else Color(0xFFEF9A9A),
             )
             Text(
                 text = userLogin?.let { "ユーザー: @$it" } ?: "ユーザー: -",
@@ -211,9 +232,33 @@ private fun StatusCard(
             )
             if (!tokenSet || repoCount == 0) {
                 IconButton(onClick = onOpenSettings) {
-                    Icon(Icons.Filled.Settings, contentDescription = "設定を開く")
+                    Icon(Icons.Filled.Settings, contentDescription = "設定を開く", tint = Color.White)
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StateFilterTabs(
+    selected: IssueFilter.StateFilter,
+    onSelect: (IssueFilter.StateFilter) -> Unit,
+) {
+    // Open / Closed の 2 タブのみ。ALL は本画面では使用しない。
+    val tabs = listOf(IssueFilter.StateFilter.OPEN, IssueFilter.StateFilter.CLOSED)
+    val labels = mapOf(
+        IssueFilter.StateFilter.OPEN to "Open",
+        IssueFilter.StateFilter.CLOSED to "Closed",
+    )
+    val selectedIndex = tabs.indexOf(selected).coerceAtLeast(0)
+    PrimaryTabRow(selectedTabIndex = selectedIndex) {
+        tabs.forEachIndexed { index, state ->
+            Tab(
+                selected = index == selectedIndex,
+                onClick = { onSelect(state) },
+                text = { Text(labels.getValue(state)) },
+            )
         }
     }
 }

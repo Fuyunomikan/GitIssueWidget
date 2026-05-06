@@ -11,6 +11,7 @@ import com.example.gitissuewidget.data.local.TokenStore
 import com.example.gitissuewidget.data.repo.IssueRepository
 import com.example.gitissuewidget.domain.Issue
 import com.example.gitissuewidget.domain.IssueFilter
+import com.example.gitissuewidget.domain.IssueState
 import com.example.gitissuewidget.domain.RepoRef
 import com.example.gitissuewidget.domain.SortDirection
 import com.example.gitissuewidget.domain.SortOption
@@ -33,6 +34,8 @@ data class MainUiState(
     val rightSwipeAction: SwipeAction = SwipeAction.NONE,
     /** Project 未設定時にスワイプされた際に表示する警告メッセージ。null = 非表示。 */
     val swipeProjectMissing: String? = null,
+    /** Open / Closed タブの選択状態。ALL は使用しない。 */
+    val selectedStateTab: IssueFilter.StateFilter = IssueFilter.StateFilter.OPEN,
 )
 
 class MainViewModel(
@@ -84,7 +87,13 @@ class MainViewModel(
             val sort = preferenceStore.sortOption.first()
             val direction = preferenceStore.sortDirection.first()
             val perPage = preferenceStore.perPage.first()
-            val filter = IssueFilter(sort = sort, direction = direction, perPage = perPage)
+            val stateFilter = _uiState.value.selectedStateTab
+            val filter = IssueFilter(
+                stateFilter = stateFilter,
+                sort = sort,
+                direction = direction,
+                perPage = perPage,
+            )
 
             // Project モードの優先: swipeProjectTitle が設定されていればその Project から取得し、
             // dueDate / Project ベースのソートを有効にする。未設定なら従来どおり REST から先頭リポジトリを取得。
@@ -142,7 +151,12 @@ class MainViewModel(
                 )
             }
             .getOrDefault(emptyList())
-        return items.sortedByOption(filter.sort, filter.direction)
+        val stateFiltered = when (filter.stateFilter) {
+            IssueFilter.StateFilter.OPEN -> items.filter { it.state == IssueState.OPEN }
+            IssueFilter.StateFilter.CLOSED -> items.filter { it.state == IssueState.CLOSED }
+            IssueFilter.StateFilter.ALL -> items
+        }
+        return stateFiltered.sortedByOption(filter.sort, filter.direction)
     }
 
     private fun List<Issue>.sortedByOption(sort: SortOption, direction: SortDirection): List<Issue> {
@@ -163,6 +177,15 @@ class MainViewModel(
 
     fun consumeError() {
         _uiState.value = _uiState.value.copy(errorMessage = null)
+    }
+
+    /**
+     * Open / Closed タブの切替。同じタブのときは何もしない。変更時は再フェッチする。
+     */
+    fun setStateTab(state: IssueFilter.StateFilter) {
+        if (_uiState.value.selectedStateTab == state) return
+        _uiState.value = _uiState.value.copy(selectedStateTab = state)
+        refresh()
     }
 
     fun consumeSwipeProjectMissing() {
