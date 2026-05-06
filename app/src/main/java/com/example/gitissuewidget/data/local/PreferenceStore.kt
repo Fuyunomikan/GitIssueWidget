@@ -73,6 +73,14 @@ class PreferenceStore(context: Context) {
         prefs[KEY_DONE_COLUMN_NAME]?.takeIf { it.isNotBlank() } ?: DEFAULT_DONE_COLUMN
     }
 
+    /**
+     * Projects v2 の Date 型カスタムフィールドの名前。表示・ソートで Issue の期限として参照される。
+     * デフォルト [DEFAULT_DUE_DATE_FIELD] = "Due Date"。
+     */
+    val dueDateFieldName: Flow<String> = dataStore.data.map { prefs ->
+        prefs[KEY_DUE_DATE_FIELD]?.takeIf { it.isNotBlank() } ?: DEFAULT_DUE_DATE_FIELD
+    }
+
     suspend fun setSortOption(value: SortOption) {
         dataStore.edit { it[KEY_SORT_OPTION] = value.name }
     }
@@ -136,6 +144,10 @@ class PreferenceStore(context: Context) {
         dataStore.edit { it[KEY_DONE_COLUMN_NAME] = value.trim().ifBlank { DEFAULT_DONE_COLUMN } }
     }
 
+    suspend fun setDueDateFieldName(value: String) {
+        dataStore.edit { it[KEY_DUE_DATE_FIELD] = value.trim().ifBlank { DEFAULT_DUE_DATE_FIELD } }
+    }
+
     companion object {
         private val KEY_SORT_OPTION = stringPreferencesKey("sort_option")
         private val KEY_SORT_DIRECTION = stringPreferencesKey("sort_direction")
@@ -149,10 +161,12 @@ class PreferenceStore(context: Context) {
         private val KEY_SWIPE_PROJECT_TITLE = stringPreferencesKey("swipe_project_title")
         private val KEY_PENDING_COLUMN_NAME = stringPreferencesKey("pending_column_name")
         private val KEY_DONE_COLUMN_NAME = stringPreferencesKey("done_column_name")
+        private val KEY_DUE_DATE_FIELD = stringPreferencesKey("due_date_field_name")
 
         const val DEFAULT_PER_PAGE = 20
         const val DEFAULT_REFRESH_INTERVAL = 30
         const val DEFAULT_PENDING_COLUMN = "Pending"
         const val DEFAULT_DONE_COLUMN = "Done"
+        const val DEFAULT_DUE_DATE_FIELD = "Due Date"
     }
 }

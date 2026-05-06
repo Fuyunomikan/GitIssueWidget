@@ -12,6 +12,8 @@ import com.example.gitissuewidget.data.repo.IssueRepository
 import com.example.gitissuewidget.domain.Issue
 import com.example.gitissuewidget.domain.IssueFilter
 import com.example.gitissuewidget.domain.RepoRef
+import com.example.gitissuewidget.domain.SortDirection
+import com.example.gitissuewidget.domain.SortOption
 import com.example.gitissuewidget.domain.SwipeAction
 import com.example.gitissuewidget.domain.User
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -84,17 +86,23 @@ class MainViewModel(
             val perPage = preferenceStore.perPage.first()
             val filter = IssueFilter(sort = sort, direction = direction, perPage = perPage)
 
-            val firstRepo = repos.firstOrNull()
-            val issues = if (firstRepo == null) {
-                emptyList()
-            } else {
-                issueRepository.fetchIssues(firstRepo, filter)
-                    .onFailure { e ->
-                        _uiState.value = _uiState.value.copy(
-                            errorMessage = e.message ?: "Issue取得に失敗しました",
-                        )
-                    }
-                    .getOrDefault(emptyList())
+            // Project モードの優先: swipeProjectTitle が設定されていればその Project から取得し、
+            // dueDate / Project ベースのソートを有効にする。未設定なら従来どおり REST から先頭リポジトリを取得。
+            val projectTitle = preferenceStore.swipeProjectTitle.first()
+            val dueDateFieldName = preferenceStore.dueDateFieldName.first()
+            val issues = when {
+                !projectTitle.isNullOrBlank() -> fetchIssuesViaProject(projectTitle, dueDateFieldName, filter)
+                else -> {
+                    val firstRepo = repos.firstOrNull()
+                    if (firstRepo == null) emptyList()
+                    else issueRepository.fetchIssues(firstRepo, filter)
+                        .onFailure { e ->
+                            _uiState.value = _uiState.value.copy(
+                                errorMessage = e.message ?: "Issue取得に失敗しました",
+                            )
+                        }
+                        .getOrDefault(emptyList())
+                }
             }
 
             _uiState.value = _uiState.value.copy(
@@ -104,6 +112,53 @@ class MainViewModel(
                 loading = false,
             )
         }
+    }
+
+    /**
+     * Project モードの Issue 取得。Project 全カラム横断で取得し、クライアント側でソートする。
+     * dueDateFieldName が一致した Date フィールド値は [Issue.dueDate] に入る。
+     */
+    private suspend fun fetchIssuesViaProject(
+        projectTitle: String,
+        dueDateFieldName: String,
+        filter: IssueFilter,
+    ): List<Issue> {
+        val meta = issueRepository.resolveProjectByTitle(projectTitle)
+            .onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = e.message ?: "Project 取得に失敗しました",
+                )
+            }
+            .getOrNull() ?: return emptyList()
+        val items = issueRepository.fetchProjectIssues(
+            projectMeta = meta,
+            columnName = null,
+            perPage = filter.perPage,
+            dueDateFieldName = dueDateFieldName,
+        )
+            .onFailure { e ->
+                _uiState.value = _uiState.value.copy(
+                    errorMessage = e.message ?: "Project items 取得に失敗しました",
+                )
+            }
+            .getOrDefault(emptyList())
+        return items.sortedByOption(filter.sort, filter.direction)
+    }
+
+    private fun List<Issue>.sortedByOption(sort: SortOption, direction: SortDirection): List<Issue> {
+        val asc = direction == SortDirection.ASC
+        if (sort == SortOption.DUE_DATE) {
+            val (dated, undated) = partition { !it.dueDate.isNullOrBlank() }
+            val datedSorted = dated.sortedBy { it.dueDate }
+            return (if (asc) datedSorted else datedSorted.reversed()) + undated
+        }
+        val sorted = when (sort) {
+            SortOption.UPDATED -> sortedBy { it.updatedAt }
+            SortOption.CREATED -> sortedBy { it.createdAt }
+            SortOption.COMMENTS -> sortedBy { it.commentsCount }
+            SortOption.DUE_DATE -> this
+        }
+        return if (asc) sorted else sorted.reversed()
     }
 
     fun consumeError() {

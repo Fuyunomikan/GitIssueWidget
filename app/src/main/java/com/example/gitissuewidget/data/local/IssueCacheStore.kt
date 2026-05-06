@@ -66,6 +66,7 @@ class IssueCacheStore(context: Context) {
         val repoOwner: String,
         val repoName: String,
         val nodeId: String = "",
+        val dueDate: String? = null,
     )
 
     @Serializable
@@ -83,6 +84,7 @@ class IssueCacheStore(context: Context) {
         repoOwner = issue.repoRef.owner,
         repoName = issue.repoRef.name,
         nodeId = issue.nodeId,
+        dueDate = issue.dueDate,
     )
 
     private fun toDomain(c: CachedIssue) = Issue(
@@ -96,6 +98,7 @@ class IssueCacheStore(context: Context) {
         commentsCount = c.commentsCount,
         repoRef = RepoRef(c.repoOwner, c.repoName),
         nodeId = c.nodeId,
+        dueDate = c.dueDate,
     )
 }
 

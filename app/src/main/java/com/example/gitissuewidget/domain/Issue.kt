@@ -12,6 +12,11 @@ data class Issue(
     val repoRef: RepoRef,
     /** GraphQL の `Issue.id`。Projects v2 の操作（item追加/Status更新）に必須。空文字は未取得を表す。 */
     val nodeId: String = "",
+    /**
+     * Projects v2 の Date 型カスタムフィールド（"Due Date" 等）の値。ISO-8601 ("YYYY-MM-DD")。
+     * REST 経由で取得した Issue は常に null。Project モードかつフィールド名が一致した場合のみ値が入る。
+     */
+    val dueDate: String? = null,
 )
 
 enum class IssueState { OPEN, CLOSED;

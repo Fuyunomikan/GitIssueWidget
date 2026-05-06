@@ -73,6 +73,7 @@ class IssueGlanceWidget : GlanceAppWidget() {
         val perPage = container.preferenceStore.perPage.first()
         val showOpenBadge = container.preferenceStore.showOpenBadge.first()
         val showLabels = container.preferenceStore.showLabels.first()
+        val dueDateFieldName = container.preferenceStore.dueDateFieldName.first()
         val filter = IssueFilter(
             stateFilter = widgetConfig?.stateFilter ?: IssueFilter.StateFilter.OPEN,
             labels = widgetConfig?.labels.orEmpty(),
@@ -88,7 +89,7 @@ class IssueGlanceWidget : GlanceAppWidget() {
         val state: WidgetState = when {
             !tokenSet -> WidgetState.NoToken
             widgetConfig != null && widgetConfig.isProjectMode ->
-                loadProjectMode(container, widgetConfig, filter, appWidgetId)
+                loadProjectMode(container, widgetConfig, filter, appWidgetId, dueDateFieldName)
             else -> {
                 val repos: List<RepoRef> = widgetConfig?.repoRefs?.takeIf { it.isNotEmpty() }
                     ?: container.preferenceStore.watchedRepos.first()
@@ -159,6 +160,7 @@ private suspend fun loadProjectMode(
     widgetConfig: WidgetConfig,
     filter: IssueFilter,
     appWidgetId: Int?,
+    dueDateFieldName: String,
 ): WidgetState {
     val projectTitle = widgetConfig.projectTitle.orEmpty()
     val title = buildProjectHeaderTitle(widgetConfig, filter)
@@ -172,6 +174,7 @@ private suspend fun loadProjectMode(
         projectMeta = meta,
         columnName = widgetConfig.projectColumnName,
         perPage = filter.perPage,
+        dueDateFieldName = dueDateFieldName,
     )
     val items = itemsResult.getOrElse { e ->
         return cacheOrError(container, appWidgetId, title, e.message ?: "Project items 取得エラー")
@@ -237,10 +240,19 @@ private fun buildHeaderTitle(repos: List<RepoRef>, filter: IssueFilter): String 
 
 private fun List<Issue>.sortedByFilter(sort: SortOption, direction: SortDirection): List<Issue> {
     val asc = direction == SortDirection.ASC
+    if (sort == SortOption.DUE_DATE) {
+        // Issue.dueDate は ISO-8601 ("YYYY-MM-DD") なので文字列比較で日付順になる。
+        // null (未設定) は方向に関わらず常に末尾へ。
+        val (dated, undated) = partition { !it.dueDate.isNullOrBlank() }
+        val datedSorted = dated.sortedBy { it.dueDate }
+        val ordered = if (asc) datedSorted else datedSorted.reversed()
+        return ordered + undated
+    }
     val sorted = when (sort) {
         SortOption.UPDATED -> sortedBy { it.updatedAt }
         SortOption.CREATED -> sortedBy { it.createdAt }
         SortOption.COMMENTS -> sortedBy { it.commentsCount }
+        SortOption.DUE_DATE -> this // unreachable, handled above
     }
     return if (asc) sorted else sorted.reversed()
 }
@@ -388,6 +400,10 @@ private fun IssueRow(issue: Issue, displayOptions: WidgetDisplayOptions, showRep
                     color = ColorProvider(day = ComposeColor(0xFF666666), night = ComposeColor(0xFFAAAAAA)),
                 ),
             )
+            if (!issue.dueDate.isNullOrBlank()) {
+                Spacer(GlanceModifier.width(6.dp))
+                DueDateBadge(issue.dueDate)
+            }
         }
         Text(
             text = issue.title,
@@ -407,6 +423,21 @@ private fun IssueRow(issue: Issue, displayOptions: WidgetDisplayOptions, showRep
             }
         }
     }
+}
+
+@androidx.compose.runtime.Composable
+private fun DueDateBadge(dueDate: String) {
+    val past = isPastDue(dueDate)
+    val fgDay = if (past) ComposeColor(0xFFB71C1C) else ComposeColor(0xFF666666)
+    val fgNight = if (past) ComposeColor(0xFFEF9A9A) else ComposeColor(0xFFAAAAAA)
+    Text(
+        text = formatDueDateLong(dueDate),
+        style = TextStyle(
+            fontSize = 10.sp,
+            color = ColorProvider(day = fgDay, night = fgNight),
+        ),
+        maxLines = 1,
+    )
 }
 
 @androidx.compose.runtime.Composable
@@ -479,6 +510,22 @@ private fun isLight(color: ComposeColor): Boolean {
     val yiq = (color.red * 299 + color.green * 587 + color.blue * 114) / 1000
     return yiq >= 0.5f
 }
+
+/**
+ * "YYYY-MM-DD" を "YYYY/MM/DD" 形式にする。パース失敗時は元の文字列をそのまま返す。
+ */
+private fun formatDueDateLong(iso: String): String = runCatching {
+    val parts = iso.split('-')
+    if (parts.size < 3) return@runCatching iso
+    "${parts[0]}/${parts[1].padStart(2, '0')}/${parts[2].padStart(2, '0')}"
+}.getOrDefault(iso)
+
+/**
+ * 期限が今日より過去なら true。パース不能・未来・今日なら false。
+ */
+private fun isPastDue(iso: String): Boolean = runCatching {
+    java.time.LocalDate.parse(iso).isBefore(java.time.LocalDate.now())
+}.getOrDefault(false)
 
 class RefreshAction : ActionCallback {
     override suspend fun onAction(

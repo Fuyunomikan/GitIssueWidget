@@ -343,6 +343,9 @@ private fun IssueRow(issue: Issue, onClick: () -> Unit) {
                 )
                 Text(text = "#${issue.number}", style = MaterialTheme.typography.labelSmall)
                 Text(text = issue.repoRef.fullName, style = MaterialTheme.typography.labelSmall)
+                if (!issue.dueDate.isNullOrBlank()) {
+                    DueDateChip(issue.dueDate)
+                }
             }
             Text(
                 text = issue.title,
@@ -359,6 +362,16 @@ private fun IssueRow(issue: Issue, onClick: () -> Unit) {
             }
         }
     }
+}
+
+@Composable
+private fun DueDateChip(dueDate: String) {
+    val past = isPastDue(dueDate)
+    Text(
+        text = formatDueDateLong(dueDate),
+        color = if (past) Color(0xFFB71C1C) else MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.labelSmall,
+    )
 }
 
 @Composable
@@ -386,3 +399,13 @@ private fun isLight(color: Color): Boolean {
     val yiq = (color.red * 299 + color.green * 587 + color.blue * 114) / 1000
     return yiq >= 0.5f
 }
+
+private fun formatDueDateLong(iso: String): String = runCatching {
+    val parts = iso.split('-')
+    if (parts.size < 3) return@runCatching iso
+    "${parts[0]}/${parts[1].padStart(2, '0')}/${parts[2].padStart(2, '0')}"
+}.getOrDefault(iso)
+
+private fun isPastDue(iso: String): Boolean = runCatching {
+    java.time.LocalDate.parse(iso).isBefore(java.time.LocalDate.now())
+}.getOrDefault(false)

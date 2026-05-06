@@ -78,14 +78,22 @@ class IssueRepository(
      * 指定 Project の指定カラムの Issue を取得。`columnName` が null の場合は全カラム。
      * `perPage` は GitHub の `items(first:)` 上限 100 と、カラムフィルタによる削減を見込んで
      * `perPage*3 (≤100)` を fetch してからクライアント側で絞り込む。
+     *
+     * @param dueDateFieldName Projects v2 の Date 型カスタムフィールドの名前。マッチした値は
+     *   各 Issue の [Issue.dueDate] に入る。null/空のときは抽出をスキップ（dueDate は常に null）。
      */
     suspend fun fetchProjectIssues(
         projectMeta: ProjectMeta,
         columnName: String?,
         perPage: Int,
+        dueDateFieldName: String? = null,
     ): Result<List<Issue>> = runCatching {
         val fetchSize = (perPage * 3).coerceIn(perPage, 100)
-        val items = graphQl.listProjectItems(projectMeta.project.nodeId, first = fetchSize)
+        val items = graphQl.listProjectItems(
+            projectNodeId = projectMeta.project.nodeId,
+            first = fetchSize,
+            dueDateFieldName = dueDateFieldName,
+        )
         val filtered = if (columnName.isNullOrBlank()) items
         else items.filter { it.statusOptionName.equals(columnName, ignoreCase = true) }
         filtered.map { it.issue }.take(perPage)

@@ -134,11 +134,13 @@ fun SettingsScreen(
                 swipeProjectTitle = uiState.swipeProjectTitle,
                 pendingColumnName = uiState.pendingColumnName,
                 doneColumnName = uiState.doneColumnName,
+                dueDateFieldName = uiState.dueDateFieldName,
                 availableProjectTitles = availableProjectTitles,
                 projectsLoading = projectsLoading,
                 onProjectTitleChange = viewModel::setSwipeProjectTitle,
                 onPendingColumnChange = viewModel::setPendingColumnName,
                 onDoneColumnChange = viewModel::setDoneColumnName,
+                onDueDateFieldChange = viewModel::setDueDateFieldName,
                 onRefreshProjects = viewModel::refreshProjects,
             )
         }
@@ -151,17 +153,20 @@ private fun ProjectSection(
     swipeProjectTitle: String,
     pendingColumnName: String,
     doneColumnName: String,
+    dueDateFieldName: String,
     availableProjectTitles: List<String>?,
     projectsLoading: Boolean,
     onProjectTitleChange: (String) -> Unit,
     onPendingColumnChange: (String) -> Unit,
     onDoneColumnChange: (String) -> Unit,
+    onDueDateFieldChange: (String) -> Unit,
     onRefreshProjects: () -> Unit,
 ) {
     // Local edit state — only commit on focus loss / blur via onValueChange to keep typing smooth.
     var titleDraft by remember(swipeProjectTitle) { mutableStateOf(swipeProjectTitle) }
     var pendingDraft by remember(pendingColumnName) { mutableStateOf(pendingColumnName) }
     var doneDraft by remember(doneColumnName) { mutableStateOf(doneColumnName) }
+    var dueDateDraft by remember(dueDateFieldName) { mutableStateOf(dueDateFieldName) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("スワイプ用 Project (Projects v2)", style = MaterialTheme.typography.titleMedium)
@@ -201,6 +206,23 @@ private fun ProjectSection(
                 onDoneColumnChange(it)
             },
             label = { Text("Done カラム名") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        OutlinedTextField(
+            value = dueDateDraft,
+            onValueChange = {
+                dueDateDraft = it
+                onDueDateFieldChange(it)
+            },
+            label = { Text("期限フィールド名 (Date 型カスタムフィールド)") },
+            supportingText = {
+                Text(
+                    "Project に作成した Date 型カスタムフィールドの名前。Issue 行に期限が表示され、" +
+                        "ソート順を「due date」にすると期限順に並び替えできます。",
+                )
+            },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -461,7 +483,7 @@ private fun SortSection(
                 FilterChip(
                     selected = opt == sortOption,
                     onClick = { onSortOption(opt) },
-                    label = { Text(opt.apiValue) },
+                    label = { Text(opt.label) },
                 )
             }
         }

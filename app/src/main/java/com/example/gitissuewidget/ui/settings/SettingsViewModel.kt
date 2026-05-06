@@ -34,6 +34,7 @@ data class SettingsUiState(
     val swipeProjectTitle: String = "",
     val pendingColumnName: String = PreferenceStore.DEFAULT_PENDING_COLUMN,
     val doneColumnName: String = PreferenceStore.DEFAULT_DONE_COLUMN,
+    val dueDateFieldName: String = PreferenceStore.DEFAULT_DUE_DATE_FIELD,
 )
 
 private data class BasicPrefs(
@@ -58,6 +59,7 @@ private data class ProjectPrefs(
     val swipeProjectTitle: String,
     val pendingColumnName: String,
     val doneColumnName: String,
+    val dueDateFieldName: String,
 )
 
 class SettingsViewModel(
@@ -92,7 +94,10 @@ class SettingsViewModel(
         preferenceStore.swipeProjectTitle,
         preferenceStore.pendingColumnName,
         preferenceStore.doneColumnName,
-    ) { title, pending, done -> ProjectPrefs(title.orEmpty(), pending, done) }
+        preferenceStore.dueDateFieldName,
+    ) { title, pending, done, dueField ->
+        ProjectPrefs(title.orEmpty(), pending, done, dueField)
+    }
 
     val uiState: StateFlow<SettingsUiState> = combine(
         basicFlow,
@@ -113,6 +118,7 @@ class SettingsViewModel(
             swipeProjectTitle = project.swipeProjectTitle,
             pendingColumnName = project.pendingColumnName,
             doneColumnName = project.doneColumnName,
+            dueDateFieldName = project.dueDateFieldName,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState())
 
@@ -200,6 +206,10 @@ class SettingsViewModel(
 
     fun setDoneColumnName(value: String) {
         viewModelScope.launch { preferenceStore.setDoneColumnName(value) }
+    }
+
+    fun setDueDateFieldName(value: String) {
+        viewModelScope.launch { preferenceStore.setDueDateFieldName(value) }
     }
 
     /**

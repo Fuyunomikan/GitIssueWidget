@@ -97,9 +97,16 @@ class GitHubGraphQlClient(private val api: GitHubGraphQlApi) {
 
     /**
      * Project に紐づくアイテム（Issue のみ）を最大 [first] 件取得する。
-     * DraftIssue / PullRequest は除外。各アイテムには Status の現在値 (`statusOptionName`) が含まれる。
+     * DraftIssue / PullRequest は除外。各アイテムには Status の現在値 (`statusOptionName`) と、
+     * [dueDateFieldName] にマッチする Date 型カスタムフィールドの値（`Issue.dueDate`、ISO-8601）が含まれる。
+     *
+     * @param dueDateFieldName Date 型カスタムフィールドの名前（大小区別なし）。null/空のときは dueDate 抽出をスキップ。
      */
-    suspend fun listProjectItems(projectNodeId: String, first: Int = 100): List<ProjectItem> {
+    suspend fun listProjectItems(
+        projectNodeId: String,
+        first: Int = 100,
+        dueDateFieldName: String? = null,
+    ): List<ProjectItem> {
         val variables = buildJsonObject {
             put("projectId", projectNodeId)
             put("first", first)
@@ -111,7 +118,7 @@ class GitHubGraphQlClient(private val api: GitHubGraphQlApi) {
             ?.get("items")?.jsonObject
             ?.get("nodes")?.jsonArray
             ?: return emptyList()
-        return items.mapNotNull { it.jsonObject.parseProjectItem() }
+        return items.mapNotNull { it.jsonObject.parseProjectItem(dueDateFieldName) }
     }
 
     private fun com.example.gitissuewidget.data.remote.dto.GraphQlResponse.throwIfErrors() {
@@ -143,7 +150,7 @@ class GitHubGraphQlClient(private val api: GitHubGraphQlApi) {
         )
     }
 
-    private fun JsonObject.parseProjectItem(): ProjectItem? {
+    private fun JsonObject.parseProjectItem(dueDateFieldName: String?): ProjectItem? {
         val itemId = this["id"]?.jsonPrimitive?.content ?: return null
         val content = this["content"]?.jsonObject ?: return null
         if (content.isEmpty()) return null  // DraftIssue / unsupported content
@@ -168,14 +175,27 @@ class GitHubGraphQlClient(private val api: GitHubGraphQlApi) {
         val repoOwner = repoObj["owner"]?.jsonObject
             ?.get("login")?.jsonPrimitive?.content ?: return null
 
-        val statusOptionName = this["fieldValues"]?.jsonObject?.get("nodes")?.jsonArray
-            ?.firstNotNullOfOrNull { node ->
-                val o = node.jsonObject
-                val fieldName = o["field"]?.jsonObject?.get("name")?.jsonPrimitive?.content
-                if (fieldName.equals("Status", ignoreCase = true)) {
-                    o["name"]?.jsonPrimitive?.content
-                } else null
-            }
+        val fieldValueNodes = this["fieldValues"]?.jsonObject?.get("nodes")?.jsonArray
+
+        val statusOptionName = fieldValueNodes?.firstNotNullOfOrNull { node ->
+            val o = node.jsonObject
+            val fieldName = o["field"]?.jsonObject?.get("name")?.jsonPrimitive?.content
+            if (fieldName.equals("Status", ignoreCase = true)) {
+                o["name"]?.jsonPrimitive?.content
+            } else null
+        }
+
+        // ProjectV2ItemFieldDateValue: { date: "YYYY-MM-DD", field { name } }
+        // 同じ JSON ノードに `date` キーが入っていれば date value として扱う。
+        // （同じ fieldValues 配列に SingleSelect / Date が混在するため、name 一致 + date キー存在で抽出）
+        val dueDate = if (dueDateFieldName.isNullOrBlank()) null
+        else fieldValueNodes?.firstNotNullOfOrNull { node ->
+            val o = node.jsonObject
+            val fieldName = o["field"]?.jsonObject?.get("name")?.jsonPrimitive?.content
+            if (fieldName.equals(dueDateFieldName, ignoreCase = true)) {
+                o["date"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() }
+            } else null
+        }
 
         val issue = Issue(
             number = number,
@@ -188,6 +208,7 @@ class GitHubGraphQlClient(private val api: GitHubGraphQlApi) {
             commentsCount = comments,
             repoRef = RepoRef(repoOwner, repoName),
             nodeId = issueNodeId,
+            dueDate = dueDate,
         )
         return ProjectItem(itemId = itemId, statusOptionName = statusOptionName, issue = issue)
     }
@@ -262,6 +283,12 @@ class GitHubGraphQlClient(private val api: GitHubGraphQlApi) {
                             name
                             field {
                               ... on ProjectV2SingleSelectField { id name }
+                            }
+                          }
+                          ... on ProjectV2ItemFieldDateValue {
+                            date
+                            field {
+                              ... on ProjectV2FieldCommon { id name }
                             }
                           }
                         }
